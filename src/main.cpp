@@ -40,8 +40,10 @@
 #define STOP 174737
 #define DEBOUNCE_MS 200
 #define BRAKE_MS 2000
-#define WAIT_MS 3000
-
+#define WAIT_MS 1500
+#define MAX_FLOOR 3
+#define MIN_FLOOR 3
+#define FloorToFloor_MS 5000
 enum direction_t
 {
   UP,
@@ -82,12 +84,14 @@ SemaphoreHandle_t xSemDoneTransit = NULL;
 SemaphoreHandle_t xSemLanding;
 TimerHandle_t xDisbrakeTimer;
 TimerHandle_t xWaitTimer;
+TimerHandle_t xStopTransitTimer;
 TaskHandle_t xLandingHandle;
+TaskHandle_t xPublishHandle;
 SemaphoreHandle_t xTransitMutex;
 
 typedef struct
 {
-  String cmd;
+  char cmd[16];
   bool isBrake;
   direction_t dir;
   state_t state;
@@ -1504,6 +1508,8 @@ void vTransit(void *arg)
       publish_status.isBrake = false;
       publish_status.state = MOVING;
       hasChanged = true;
+
+      xTimerStart(xStopTransit, 0);
     }
   }
 }
@@ -1552,24 +1558,24 @@ void vGetDirection(void *arg)
   }
 }
 
-void vStopper(void *arg)
-{
-  for (;;)
-  {
-    if (xSemaphoreTake(xSemDoneTransit, portMAX_DELAY) == pdTRUE)
-    {
-      M_STP();
-      BRK_ON();
-      TARGET = 0;
-      moving_state = IDLE;
+// void vStopper(void *arg)
+// {
+//   for (;;)
+//   {
+//     if (xSemaphoreTake(xSemDoneTransit, portMAX_DELAY) == pdTRUE)
+//     {
+//       M_STP();
+//       BRK_ON();
+//       TARGET = 0;
+//       moving_state = IDLE;
 
-      publish_status.targetFloor = 0;
-      publish_status.isBrake = true;
-      publish_status.state = IDLE;
-      hasChanged = true;
-    }
-  }
-}
+//       publish_status.targetFloor = 0;
+//       publish_status.isBrake = true;
+//       publish_status.state = IDLE;
+//       hasChanged = true;
+//     }
+//   }
+// }
 
 void vLanding(void *arg)
 {
@@ -1612,6 +1618,18 @@ void vDisbrake(TimerHandle_t xTimer)
 void vWaitToTransit(TimerHandle_t xTimer)
 {
   xSemaphoreGive(xSemTransit);
+}
+
+void vStopTransit(TimerHandle_t xTimer){
+      M_STP();
+      BRK_ON();
+      TARGET = 0;
+      moving_state = IDLE;
+
+      publish_status.targetFloor = 0;
+      publish_status.isBrake = true;
+      publish_status.state = IDLE;
+      hasChanged = true;
 }
 
 void vReceive(void *arg)
@@ -1669,38 +1687,39 @@ void vReceive(void *arg)
   }
 }
 
-void ARDUINO_ISR_ATTR ISR_atFloor1()
+void ARDUINO_ISR_ATTR ISR_LowerLim()
 {
   unsigned long now = millis();
-  if (now - lastFloorISR_1 < DEBOUNCE_MS)
+  if (now - lastLowerLim < DEBOUNCE_MS)
     return; // debounce 50ms
-  lastFloorISR_1 = now;
-  Serial.println("reach floor1");
+  lastLowerLim = now;
+  Serial.println("reach lowest");
 
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-  POS = 1;
+  POS = MIN_FLOOR;
   btwFloor = false;
 
   publish_status.pos = POS;
   publish_status.btwFloor = false;
   hasChanged = true;
+
   if (TARGET == POS && emergency == false)
   {
-    Serial.println("finish command toFloor1");
+    Serial.println("finish command toLowest");
     xSemaphoreGiveFromISR(xSemDoneTransit, &xHigherPriorityTaskWoken);
   }
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-void ARDUINO_ISR_ATTR ISR_atFloor2()
+void ARDUINO_ISR_ATTR ISR_UpperLim()
 {
   unsigned long now = millis();
-  if (now - lastFloorISR_2 < DEBOUNCE_MS)
+  if (now - lastUpperLim < DEBOUNCE_MS)
     return;
-  lastFloorISR_2 = now;
-  Serial.println("reach floor2");
+  lastUpperLim = now;
+  Serial.println("reach highest");
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-  POS = 2;
+  POS = MAX_FLOOR;
   btwFloor = false;
 
   publish_status.pos = POS;
@@ -1708,7 +1727,7 @@ void ARDUINO_ISR_ATTR ISR_atFloor2()
   hasChanged = true;
   if (TARGET == POS && emergency == false)
   {
-    Serial.println("finish command toFloor2");
+    Serial.println("finish command toHighest");
     xSemaphoreGiveFromISR(xSemDoneTransit, &xHigherPriorityTaskWoken);
   }
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
@@ -1727,7 +1746,7 @@ void ARDUINO_ISR_ATTR ISR_Landing()
   publish_status.mode = EMERGENCY;
   hasChanged = true;
 
-  if (POS != 1)
+  if (POS != MIN_FLOOR)
   {
     xTaskResumeFromISR(xLandingHandle);
     xSemaphoreGiveFromISR(xSemLanding, &xHigherPriorityTaskWoken);
@@ -1831,8 +1850,8 @@ void setup()
   pinMode(floorSensor1, INPUT); // INPUT_PULLUP
   pinMode(floorSensor2, INPUT);
   // pinMode(floorSensor3, INPUT_PULLUP);
-  attachInterrupt(floorSensor1, ISR_atFloor1, FALLING);
-  attachInterrupt(floorSensor2, ISR_atFloor2, FALLING);
+  attachInterrupt(floorSensor1, ISR_LowerLim, FALLING);
+  attachInterrupt(floorSensor2, ISR_UpperLim, FALLING);
   // attachInterrupt(floorSensor3, ISR_atFloor3, FALLING);
   pinMode(BRK, OUTPUT);
   pinMode(NP, INPUT_PULLUP);
@@ -1851,18 +1870,19 @@ void setup()
   xTransitMutex = xSemaphoreCreateMutex();
   xQueueGetDirection = xQueueCreate(1, sizeof(uint8_t));
   xWaitTimer = xTimerCreate("WaitTimer", WAIT_MS, pdFALSE, NULL, vWaitToTransit);
+  xStopTransitTimer = xTimerCreate("StopTransitTimer", FloorToFloor_MS, pdFALSE, NULL, vStopTransit);
   xDisbrakeTimer = xTimerCreate("DisbrakeTimer", BRAKE_MS, pdFALSE, NULL, vDisbrake);
 
   mqttMutex = xSemaphoreCreateMutex();
   hasChangedMutex = xSemaphoreCreateMutex();
   // pubQueue = xQueueCreate(20, sizeof(msg));
   xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 3, NULL);
-  xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, NULL);
+  xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, &xPublishHandle);
 
   xTaskCreate(vReceive, "Receive", 1024, NULL, 2, NULL);
   xTaskCreate(vGetDirection, "GetDirection", 1024, NULL, 3, NULL);
   xTaskCreate(vTransit, "Transit", 1024, NULL, 3, NULL);
-  xTaskCreate(vStopper, "Stopper", 1024, NULL, 4, NULL);
+  // xTaskCreate(vStopper, "Stopper", 1024, NULL, 4, NULL);
   xTaskCreate(vLanding, "Landing", 2048, NULL, 4, &xLandingHandle);
   xTaskCreate(vStatusLogger, "StatusLogger", 2048, NULL, 2, NULL);
 
