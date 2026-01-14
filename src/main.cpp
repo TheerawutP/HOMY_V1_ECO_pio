@@ -14,10 +14,7 @@
 #include "FS.h"
 #include "SPIFFS.h"
 
-// #include <OTA.h>
-#include <Update.h>
-#include "soc/soc.h"
-#include "soc/rtc_cntl_reg.h"
+
 
 // gpio
 #define PIN_RX 16
@@ -44,7 +41,7 @@
 #define WAIT_MS 1000
 #define MAX_FLOOR 2
 #define MIN_FLOOR 1
-#define FloorToFloor_MS 5000
+#define FloorToFloor_MS 18500   //only for up dir
 enum direction_t
 {
   UP,
@@ -713,7 +710,6 @@ void runWifiPortal_after_connected_to_WIFI()
   }
 }
 
-// Called when receiving any WebSocket message
 void onWebSocketEvent(uint8_t num,
                       WStype_t type,
                       uint8_t *payload,
@@ -1005,63 +1001,6 @@ void publishMqtt(const char *topic, const char *msg)
   }
 }
 
-bool fileExists(fs::FS &fs, const char *path)
-{
-  return fs.exists(path);
-}
-
-String readFileAsString(fs::FS &fs, const char *path)
-{
-  File file = fs.open(path, FILE_READ);
-  if (!file || file.isDirectory())
-  {
-    Serial.printf("Failed to open file %s for reading\n", path);
-    return "";
-  }
-
-  String content = "";
-  while (file.available())
-  {
-    content += char(file.read());
-  }
-  file.close();
-  return content;
-}
-
-int readFileAsInt(fs::FS &fs, const char *path)
-{
-  String str = readFileAsString(fs, path);
-  str.trim();
-  return str.toInt();
-}
-
-void writeFile(fs::FS &fs, const char *path, const char *message)
-{
-  Serial.printf("Writing file: %s\r\n", path);
-
-  File file = fs.open(path, FILE_WRITE);
-  if (!file)
-  {
-    Serial.println("- failed to open file for writing");
-    return;
-  }
-  if (file.print(message))
-  {
-    Serial.println("- file written");
-  }
-  else
-  {
-    Serial.println("- write failed");
-  }
-  file.close();
-}
-
-void writeFile(fs::FS &fs, const char *path, int value)
-{
-  writeFile(fs, path, String(value).c_str());
-}
-
-
 void vStatusLogger(void *arg)
 {
   int lastPOS = -1;
@@ -1082,7 +1021,6 @@ void vStatusLogger(void *arg)
     vTaskDelay(1000);
   }
 }
-
 
 bool readSSIDPWDfile(String m_pwd_filename_to_read)
 {
@@ -1219,16 +1157,16 @@ void vTransit(void *arg)
         TARGET = transit.floor;
         xSemaphoreGive(xTransitMutex);
       }
-      BRK_OFF();
+      // BRK_OFF();
       Serial.println("start transit");
       moving_state = MOVING;
       ROTATE(transit.dir);
-
-      publish_status.isBrake = false;
+      
+      if(transit.dir == UP) xTimerStart(xStopTransitTimer, 0);
+      
+      // publish_status.isBrake = false;
       publish_status.state = MOVING;
       hasChanged = true;
-
-      xTimerStart(xStopTransitTimer, 0);
     }
   }
 }
@@ -1277,7 +1215,6 @@ void vGetDirection(void *arg)
   }
 }
 
-
 void vLanding(void *arg)
 {
   for (;;)
@@ -1324,7 +1261,7 @@ void vWaitToTransit(TimerHandle_t xTimer)
 void vStopTransit(TimerHandle_t xTimer)
 {
   M_STP();
-  BRK_ON();
+  // BRK_ON();
   TARGET = 0;
   moving_state = IDLE;
   btwFloor = false;
@@ -1333,7 +1270,7 @@ void vStopTransit(TimerHandle_t xTimer)
   publish_status.pos = POS;
   publish_status.targetFloor = TARGET;
   publish_status.btwFloor = btwFloor;
-  publish_status.isBrake = true;
+  // publish_status.isBrake = true;
   publish_status.state = moving_state;
   hasChanged = true;
 }
@@ -1573,7 +1510,7 @@ void setup()
   pinMode(RST_SYS, INPUT_PULLUP);
   attachInterrupt(RST_SYS, ISR_ResetSystem, FALLING);
 
-  BRK_ON;
+  // BRK_ON;
   M_STP;
 
   xSemTransit = xSemaphoreCreateBinary();
