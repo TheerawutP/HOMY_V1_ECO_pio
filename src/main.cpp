@@ -7,6 +7,7 @@
 #include <AsyncJson.h>
 #include "wifi_credentials.h"
 #include "WebSocketsServer.h"
+#include "elevatorStorage.h"
 #include "DNSServer.h"
 #include <PubSubClient.h>
 #include "RCSwitch.h"
@@ -40,9 +41,9 @@
 #define STOP 174737
 #define DEBOUNCE_MS 200
 #define BRAKE_MS 2000
-#define WAIT_MS 1500
-#define MAX_FLOOR 3
-#define MIN_FLOOR 3
+#define WAIT_MS 1000
+#define MAX_FLOOR 2
+#define MIN_FLOOR 1
 #define FloorToFloor_MS 5000
 enum direction_t
 {
@@ -69,7 +70,7 @@ const int mqtt_port = 1883; // unencrypt
 
 // topics
 char *KIT_topic = "kit";
-char *UT_case = "/UT_0001";
+char *UT_case = "/UT_500";
 char *system_status = "/sys_v2";
 
 WiFiClient wifiClient;
@@ -140,14 +141,12 @@ String temp_json_string = "";
 
 volatile uint8_t POS = -1;
 volatile uint8_t defaultPOS = 1;
-volatile uint8_t TARGET = -1;
+volatile uint8_t TARGET = 0;
 volatile unsigned long lastFloorISR_1 = 0;
 volatile unsigned long lastFloorISR_2 = 0;
 volatile unsigned long lastFloorISR_3 = 0;
 volatile unsigned long lastLowerLim = 0;
 volatile unsigned long lastUpperLim = 0;
-
-
 
 volatile unsigned long lastNoPowerISR = 0;
 volatile unsigned long lastResetSysISR = 0;
@@ -222,7 +221,8 @@ String statusToJson(const status_t status)
 {
   // Create a JSON document (adjust size if needed, 256 is usually enough for this struct)
   // Note: Use StaticJsonDocument<256> if you are on ArduinoJson v6
-  JsonDocument doc;
+  // JsonDocument doc;
+  StaticJsonDocument<256> doc;
 
   // Add string values
   doc["cmd"] = status.cmd;
@@ -237,7 +237,7 @@ String statusToJson(const status_t status)
 
   // Add Enums (Must cast to int, or use a helper function to convert to String)
   doc["dir"] = (int)status.dir;
-  doc["state"] = (int)status.state;
+  doc["movingState"] = (int)status.state;
   doc["mode"] = (int)status.mode;
 
   // Serialize into a String
@@ -251,78 +251,6 @@ void setupMQTT()
 {
   mqttClient.setServer(mqtt_broker, mqtt_port);
   // mqttClient.setCallback(callback);
-}
-
-void handle_websocket_text(uint8_t *payload)
-{
-  // do something...
-  Serial.printf("handle_websocket_text called for: %s\n", payload);
-
-  // test JSON parsing...
-  // char m_JSONMessage[] = "{\"Key1\":123,\"Key2\",345}";
-  // StaticJsonDocument<1000> m_JSONdoc;
-  // deserializeJson(m_JSONdoc, m_JSONMessage); // m_JSONdoc is now a json object
-  // int m_key1_value = m_JSONdoc["Key1"];
-  // Serial.println(m_key1_value);
-
-  // Parse JSON payload
-  StaticJsonDocument<1000> m_JSONdoc_from_payload;
-  DeserializationError m_error = deserializeJson(m_JSONdoc_from_payload, payload); // m_JSONdoc is now a json object
-  if (m_error)
-  {
-    Serial.println("deserializeJson() failed with code ");
-    Serial.println(m_error.c_str());
-  }
-  // Serial.println(m_key2_value);
-  // now to iterate over (unknown) keys, we have to cast the StaticJsonDocument object into a JsonObject:
-  // see https://techtutorialsx.com/2019/07/09/esp32-arduinojson-printing-the-keys-of-the-jsondocument/
-  JsonObject m_JsonObject_from_payload = m_JSONdoc_from_payload.as<JsonObject>();
-  // Iterate and print to serial:
-  //   uint8_t LMPgain_control_panel = 6; // Feedback resistor of TIA.
-  // int num_adc_readings_to_average_control_panel = 1;
-  // int sweep_param_delayTime_ms_control_panel = 50;
-  // int cell_voltage_control_panel = 100;
-
-  // if (true == false) // if key = "change_cell_voltage_to"
-  // {
-  //   m_websocket_send_rate = (float)atof((const char *)&payload[0]); // adjust data send rate used in loop
-  // }
-  // deserializeJson(m_JSONdoc, payload); // m_JSONdoc is now a json object that was payload delivered by websocket message
-}
-
-void handleFileList(AsyncWebServerRequest *request)
-{
-  Serial.println("handle fle list");
-  if (!request->hasParam("dir"))
-  {
-    request->send(500, "text/plain", "BAD ARGS");
-    return;
-  }
-}
-
-void handleFileDelete(AsyncWebServerRequest *request)
-{
-  Serial.println("in file delete");
-  if (request->params() == 0)
-  {
-    return request->send(500, "text/plain", "BAD ARGS");
-  }
-  AsyncWebParameter *p = request->getParam(0);
-  String path = p->value();
-  Serial.println("handleFileDelete: " + path);
-  if (path == "/")
-  {
-    return request->send(500, "text/plain", "BAD PATH");
-  }
-
-  if (!SPIFFS.exists(path))
-  {
-    return request->send(404, "text/plain", "FileNotFound");
-  }
-
-  SPIFFS.remove(path);
-  request->send(200, "text/plain", "");
-  path = String();
 }
 
 void reconnect()
@@ -406,7 +334,7 @@ void setUpAPService()
   WiFi.mode(WIFI_AP);
   // WiFi.softAPConfig(IPAddress(172, 217, 28, 1), IPAddress(172, 217, 28, 1), IPAddress(255, 255, 255, 0));
   WiFi.softAP("Ximplex_KIT");
-  delay(500);
+  delay(1000);
 
   /* Setup the DNS server redirecting all the domains to the apIP */
   // dnsServer->setErrorReplyCode(DNSReplyCode::NoError);
@@ -735,8 +663,8 @@ void runWifiPortal()
   m_wifitools_server->on("/saveSecret", HTTP_POST, [](AsyncWebServerRequest *request)
                          { handleGetSavSecreteJson(request); });
 
-  m_wifitools_server->on("/list", HTTP_ANY, [](AsyncWebServerRequest *request)
-                         { handleFileList(request); });
+  // m_wifitools_server->on("/list", HTTP_ANY, [](AsyncWebServerRequest *request)
+  //                        { handleFileList(request); });
 
   m_wifitools_server->on("/wifiScan.json", HTTP_GET, [](AsyncWebServerRequest *request)
                          { getWifiScanJson(request); });
@@ -811,17 +739,17 @@ void onWebSocketEvent(uint8_t num,
   break;
 
   // Echo text message back to client
-  case WStype_TEXT:
-    // Serial.println(payload[0,length-1]); // this doesn't work....
-    Serial.printf("[%u] Received text: %s\n", num, payload);
-    // m_websocketserver.sendTXT(num, payload);
-    // if (true == false) // later change to if message has certain format:
-    // {
-    //   m_websocket_send_rate = (float)atof((const char *)&payload[0]); // adjust data send rate used in loop
-    // }
-    handle_websocket_text(payload);
+  // case WStype_TEXT:
+  //   // Serial.println(payload[0,length-1]); // this doesn't work....
+  //   Serial.printf("[%u] Received text: %s\n", num, payload);
+  //   // m_websocketserver.sendTXT(num, payload);
+  //   // if (true == false) // later change to if message has certain format:
+  //   // {
+  //   //   m_websocket_send_rate = (float)atof((const char *)&payload[0]); // adjust data send rate used in loop
+  //   // }
+  //   handle_websocket_text(payload);
 
-    break;
+  //   break;
 
   // For everything else: do nothing
   case WStype_BIN:
@@ -835,109 +763,7 @@ void onWebSocketEvent(uint8_t num,
   }
 }
 
-void sendValueOverWebsocketJSON(int value_to_send_over_websocket) // sends integer as JSON object to websocket
-{
-  String json = "{\"value\":";
-  json += String(value_to_send_over_websocket);
-  json += "}";
-  m_websocketserver.broadcastTXT(json.c_str(), json.length());
-}
 
-void handleFirmwareUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
-{
-  // handle upload and update
-  if (!index)
-  {
-    Serial.printf("Update: %s\n", filename.c_str());
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN))
-    { // start with max available size
-      Update.printError(Serial);
-    }
-  }
-
-  /* flashing firmware to ESP*/
-  if (len)
-  {
-    Update.write(data, len);
-  }
-
-  if (final)
-  {
-    if (Update.end(true))
-    { // true to set the size to the current progress
-      Serial.printf("Update Success: %ub written\nRebooting...\n", index + len);
-    }
-    else
-    {
-      Update.printError(Serial);
-    }
-  }
-  // alternative approach
-  // https://github.com/me-no-dev/ESPAsyncWebServer/issues/542#issuecomment-508489206
-}
-
-void handleFilesystemUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
-{
-  // handle upload and update
-  if (!index)
-  {
-    Serial.printf("Update: %s\n", filename.c_str());
-    // if (!Update.begin(UPDATE_SIZE_UNKNOWN))
-    if (!Update.begin(SPIFFS.totalBytes(), U_SPIFFS))
-    { // start with max available size
-      Update.printError(Serial);
-    }
-  }
-
-  /* flashing firmware to ESP*/
-  if (len)
-  {
-    Update.write(data, len);
-  }
-
-  if (final)
-  {
-    if (Update.end(true))
-    { // true to set the size to the current progress
-      Serial.printf("Update Success: %ub written\nRebooting...\n", index + len);
-    }
-    else
-    {
-      Update.printError(Serial);
-    }
-  }
-  // alternative approach
-  // https://github.com/me-no-dev/ESPAsyncWebServer/issues/542#issuecomment-508489206
-}
-
-void handleUpload(AsyncWebServerRequest *request, String filename, String redirect, size_t index, uint8_t *data, size_t len, bool final)
-{
-  Serial.println("handleUpload called");
-  Serial.println(filename);
-  Serial.println(redirect);
-  File fsUploadFile;
-  if (!index)
-  {
-    if (!filename.startsWith("/"))
-      filename = "/" + filename;
-    Serial.println((String) "UploadStart: " + filename);
-    fsUploadFile = SPIFFS.open(filename, "w"); // Open the file for writing in SPIFFS (create if it doesn't exist)
-  }
-  for (size_t i = 0; i < len; i++)
-  {
-    fsUploadFile.write(data[i]);
-    // Serial.write(data[i]);
-  }
-  if (final)
-  {
-    Serial.println((String) "UploadEnd: " + filename);
-    fsUploadFile.close();
-
-    request->send(200, "text/HTML", "  <head> <meta http-equiv=\"refresh\" content=\"2; URL=files.html\" /> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"> </head> <body> <h1> File uploaded! </h1> <p> Returning to file page. </p> </body>");
-
-    // request->redirect(redirect);
-  }
-}
 
 void configureserver()
 // configures server
@@ -947,17 +773,7 @@ void configureserver()
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, PUT");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "*");
 
-  // // Button #xyz
-  // server.addHandler(new AsyncCallbackJsonWebHandler("/buttonxyzpressed", [](AsyncWebServerRequest *requestxyz, JsonVariant &jsonxyz) {
-  //   const JsonObject &jsonObjxyz = jsonxyz.as<JsonObject>();
-  //   if (jsonObjxyz["on"])
-  //   {
-  //     Serial.println("Button xyz pressed.");
-  //     // digitalWrite(LEDPIN, HIGH);
-  //     Sweep_Mode = CV;
-  //   }
-  //   requestxyz->send(200, "OK");
-  // }));
+
 
   // Button #1
   server.addHandler(new AsyncCallbackJsonWebHandler("/button1pressed", [](AsyncWebServerRequest *request1, JsonVariant &json1)
@@ -1152,16 +968,7 @@ void configureserver()
               request->send(200, "text/HTML", "  <head> <meta http-equiv=\"refresh\" content=\"2; URL=index.html\" /> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"> </head> <body> <h1> Settings saved! </h1> <p> Returning to main page. </p> </body>");
               // request->send(200, "OK");
 
-              //   <head>
-              //   <meta http-equiv="refresh" content="5; URL=https://www.bitdegree.org/" />
-              // </head>
-              // <body>
-              //   <p>If you are not redirected in five seconds, <a href="https://www.bitdegree.org/">click here</a>.</p>
-              // </body>
 
-              // request->send(200, "text/URL", "www.google.com");
-              // request->send(200, "text/URL", "<meta http-equiv=\"Refresh\" content=\"0; URL=https://google.com/\">");
-              // <meta http-equiv="Refresh" content="0; URL=https://example.com/">
             });
 
   // Wifitools stuff:
@@ -1173,63 +980,7 @@ void configureserver()
   server.on("/wifiScan.json", HTTP_GET, [](AsyncWebServerRequest *request)
             { getWifiScanJson(request); });
 
-  // List directory:
-  server.on("/list", HTTP_ANY, [](AsyncWebServerRequest *request)
-            { handleFileList(request); });
 
-  // Delete file
-  server.on(
-      "/edit", HTTP_DELETE, [](AsyncWebServerRequest *request)
-      { handleFileDelete(request); });
-
-  // Peter Burke custom code:
-  server.on(
-      "/m_fupload", HTTP_POST, [](AsyncWebServerRequest *request) {},
-      [](AsyncWebServerRequest *request, const String &filename, size_t index, uint8_t *data,
-         size_t len, bool final)
-      { handleUpload(request, filename, "files.html", index, data, len, final); });
-
-  // From https://github.com/me-no-dev/ESPAsyncWebServer/issues/542#issuecomment-573445113
-  // handling uploading firmware file
-  server.on(
-      "/m_firmware_update", HTTP_POST, [](AsyncWebServerRequest *request)
-      {
-        if (!Update.hasError())
-        {
-          AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "OK");
-          response->addHeader("Connection", "close");
-          request->send(response);
-          ESP.restart();
-        }
-        else
-        {
-          AsyncWebServerResponse *response = request->beginResponse(500, "text/plain", "ERROR");
-          response->addHeader("Connection", "close");
-          request->send(response);
-        } },
-      handleFirmwareUpload);
-
-  // handling uploading filesystem file
-  // see https://github.com/espressif/arduino-esp32/blob/371f382db7dd36c470bb2669b222adf0a497600d/libraries/HTTPUpdateServer/src/HTTPUpdateServer.h
-  server.on(
-      "/m_filesystem_update", HTTP_POST, [](AsyncWebServerRequest *request)
-      {
-        if (!Update.hasError())
-        {
-          AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "OK");
-          response->addHeader("Connection", "close");
-          request->send(response);
-          ESP.restart();
-        }
-        else
-        {
-          AsyncWebServerResponse *response = request->beginResponse(500, "text/plain", "ERROR");
-          response->addHeader("Connection", "close");
-          request->send(response);
-        } },
-      handleFilesystemUpload);
-
-  // Done with configuration, begin server:
   server.begin();
 }
 
@@ -1310,50 +1061,28 @@ void writeFile(fs::FS &fs, const char *path, int value)
   writeFile(fs, path, String(value).c_str());
 }
 
+
 void vStatusLogger(void *arg)
 {
   int lastPOS = -1;
+  bool lastBtw = false;
+
   for (;;)
   {
-    if (POS != lastPOS)
+    // Check if either variable has changed
+    if (POS != lastPOS || btwFloor != lastBtw)
+    // if(POS != lastPOS)
     {
-      writeFile(SPIFFS, "/current_pos.txt", POS);
+
+      saveStatus(); 
+
       lastPOS = POS;
+      // lastBtw = btwFloor;
     }
     vTaskDelay(1000);
   }
 }
 
-void listDir(const char *dirname, uint8_t levels)
-{
-  // from https://github.com/espressif/arduino-esp32/blob/master/libraries/SPIFFS/examples/SPIFFS_Test/SPIFFS_Test.ino#L9
-  // see also https://techtutorialsx.com/2019/02/24/esp32-arduino-listing-files-in-a-spiffs-file-system-specific-path/
-  Serial.printf("Listing directory: %s\r\n", dirname);
-
-  File root = SPIFFS.open(dirname);
-  if (!root)
-  {
-    Serial.println("- failed to open directory");
-    return;
-  }
-  if (!root.isDirectory())
-  {
-    Serial.println(" - not a directory");
-    return;
-  }
-
-  File file = root.openNextFile();
-  while (file)
-  {
-
-    Serial.print("  FILE: ");
-    Serial.print(file.name());
-    Serial.print("\tSIZE: ");
-    Serial.println(file.size());
-
-    file = root.openNextFile();
-  }
-}
 
 bool readSSIDPWDfile(String m_pwd_filename_to_read)
 {
@@ -1396,22 +1125,7 @@ bool readSSIDPWDfile(String m_pwd_filename_to_read)
   String m_PWD1_name = m_JSONdoc_from_pwd_file["PWD1"];
   String m_PWD2_name = m_JSONdoc_from_pwd_file["PWD1"];
   String m_PWD3_name = m_JSONdoc_from_pwd_file["PWD1"];
-  // Serial.print("m_SSID1_name = ");
-  // Serial.print(m_SSID1_name);
-  // Serial.print(F("\t")); // tab
-  // Serial.print("m_PWD1_name = ");
-  // Serial.print(F("\t")); // tab
-  // Serial.print("m_SSID2_name = ");
-  // Serial.print(m_SSID2_name);
-  // Serial.print(F("\t")); // tab
-  // Serial.print("m_PWD2_name = ");
-  // Serial.print(m_PWD2_name);
-  // Serial.print(F("\t")); // tab
-  // Serial.print("m_SSID3_name = ");
-  // Serial.print(m_SSID3_name);
-  // Serial.print(F("\t")); // tab
-  // Serial.print("m_PWD3_name = ");
-  // Serial.println(m_PWD3_name);
+
 
   // Try connecting:
   //****************************8
@@ -1485,7 +1199,7 @@ void vPublishTask(void *pvParams)
       {
 
         String status_payload = statusToJson(publish_status);
-        publishMqtt("kit/UT_1000", status_payload.c_str());
+        publishMqtt("kit/UT_500", status_payload.c_str());
         hasChanged = false;
       }
       xSemaphoreGive(hasChangedMutex);
@@ -1563,24 +1277,6 @@ void vGetDirection(void *arg)
   }
 }
 
-// void vStopper(void *arg)
-// {
-//   for (;;)
-//   {
-//     if (xSemaphoreTake(xSemDoneTransit, portMAX_DELAY) == pdTRUE)
-//     {
-//       M_STP();
-//       BRK_ON();
-//       TARGET = 0;
-//       moving_state = IDLE;
-
-//       publish_status.targetFloor = 0;
-//       publish_status.isBrake = true;
-//       publish_status.state = IDLE;
-//       hasChanged = true;
-//     }
-//   }
-// }
 
 void vLanding(void *arg)
 {
@@ -1625,16 +1321,21 @@ void vWaitToTransit(TimerHandle_t xTimer)
   xSemaphoreGive(xSemTransit);
 }
 
-void vStopTransit(TimerHandle_t xTimer){
-      M_STP();
-      BRK_ON();
-      TARGET = 0;
-      moving_state = IDLE;
+void vStopTransit(TimerHandle_t xTimer)
+{
+  M_STP();
+  BRK_ON();
+  TARGET = 0;
+  moving_state = IDLE;
+  btwFloor = false;
+  POS = publish_status.targetFloor; // update current position
 
-      publish_status.targetFloor = 0;
-      publish_status.isBrake = true;
-      publish_status.state = IDLE;
-      hasChanged = true;
+  publish_status.pos = POS;
+  publish_status.targetFloor = TARGET;
+  publish_status.btwFloor = btwFloor;
+  publish_status.isBrake = true;
+  publish_status.state = moving_state;
+  hasChanged = true;
 }
 
 void vReceive(void *arg)
@@ -1656,14 +1357,14 @@ void vReceive(void *arg)
         }
         Serial.println("received toFloor1 cmd");
         // publish_status.cmd = "toFloor1";
-        strcpy(publish_status.cmd, "toFloor1" );
+        strcpy(publish_status.cmd, "toFloor1");
         if (moving_state == IDLE)
           xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
         break;
       case toFloor2:
         cmd_buf = 2;
         Serial.println("received toFloor2 cmd");
-        strcpy(publish_status.cmd, "toFloor2" );
+        strcpy(publish_status.cmd, "toFloor2");
         // publish_status.cmd = "toFloor2";
         if (moving_state == IDLE)
           xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
@@ -1674,19 +1375,23 @@ void vReceive(void *arg)
       //   if(moving_state == IDLE) xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
       //   break;
       case STOP:
-        M_STP();
-        BRK_ON();
-        xQueueReset(xQueueGetDirection);
-        TARGET = 0;
-        moving_state = IDLE;
-        lastDir = transit.dir;
-        btwFloor = true;
+        if (moving_state != IDLE)
+        {
+          xTimerStop(xStopTransitTimer, 0);
+          btwFloor = true;
+          M_STP();
+          BRK_ON();
+          xQueueReset(xQueueGetDirection);
+          TARGET = 0;
+          moving_state = IDLE;
+          lastDir = transit.dir;
 
-        publish_status.btwFloor = true;
-        publish_status.targetFloor = 0;
-        publish_status.state = IDLE;
-        publish_status.isBrake = true;
-        break;
+          publish_status.btwFloor = btwFloor;
+          publish_status.targetFloor = 0;
+          publish_status.state = IDLE;
+          publish_status.isBrake = true;
+          break;
+        }
       }
       hasChanged = true;
     }
@@ -1700,9 +1405,10 @@ void ARDUINO_ISR_ATTR ISR_LowerLim()
   if (now - lastLowerLim < DEBOUNCE_MS)
     return; // debounce 50ms
   lastLowerLim = now;
-  Serial.println("reach lowest");
+  // Serial.println("reach lowest");
 
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
   POS = MIN_FLOOR;
   btwFloor = false;
 
@@ -1715,6 +1421,7 @@ void ARDUINO_ISR_ATTR ISR_LowerLim()
     Serial.println("finish command toLowest");
     xSemaphoreGiveFromISR(xSemDoneTransit, &xHigherPriorityTaskWoken);
   }
+
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
@@ -1724,8 +1431,9 @@ void ARDUINO_ISR_ATTR ISR_UpperLim()
   if (now - lastUpperLim < DEBOUNCE_MS)
     return;
   lastUpperLim = now;
-  Serial.println("reach highest");
+  // Serial.println("reach highest");
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
   POS = MAX_FLOOR;
   btwFloor = false;
 
@@ -1737,6 +1445,7 @@ void ARDUINO_ISR_ATTR ISR_UpperLim()
     Serial.println("finish command toHighest");
     xSemaphoreGiveFromISR(xSemDoneTransit, &xHigherPriorityTaskWoken);
   }
+
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
@@ -1746,7 +1455,7 @@ void ARDUINO_ISR_ATTR ISR_Landing()
   if (now - lastNoPowerISR < DEBOUNCE_MS)
     return;
   lastNoPowerISR = now;
-  Serial.println("NO POWER is detected!");
+  // Serial.println("NO POWER is detected!");
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
   emergency = true;
@@ -1758,6 +1467,7 @@ void ARDUINO_ISR_ATTR ISR_Landing()
     xTaskResumeFromISR(xLandingHandle);
     xSemaphoreGiveFromISR(xSemLanding, &xHigherPriorityTaskWoken);
   }
+
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
@@ -1767,7 +1477,7 @@ void ARDUINO_ISR_ATTR ISR_ResetSystem()
   if (now - lastResetSysISR < DEBOUNCE_MS)
     return;
   lastResetSysISR = now;
-  Serial.println("Reset System, Back to Floor1");
+  // Serial.println("Reset System, Back to Floor1");
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
   if (POS != 1)
@@ -1779,6 +1489,7 @@ void ARDUINO_ISR_ATTR ISR_ResetSystem()
     hasChanged = true;
     xSemaphoreGiveFromISR(xSemTransit, &xHigherPriorityTaskWoken);
   }
+
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
@@ -1792,8 +1503,7 @@ void setup()
 
   Serial.println("Welcome to Ximplex_KIT");
 
-  delay(50);
-  delay(50);
+  delay(500);
 
   // ############################### SPIFFS STARTUP #######################################
   if (!SPIFFS.begin(true))
@@ -1802,17 +1512,10 @@ void setup()
     return;
   }
 
-  if (SPIFFS.exists("/current_pos.txt"))
-  {
-    POS = readFileAsInt(SPIFFS, "/current_pos.txt");
-  }
-  else
-  {
-    POS = defaultPOS;
-    writeFile(SPIFFS, "/current_pos.txt", POS);
-  }
-
+  loadStatus();
   RF.enableReceive(RFReceiver); // attach interrupt to 22
+
+  delay(1000);
 
   bool m_autoconnected_attempt_succeeded = false;
   m_autoconnected_attempt_succeeded = connectAttempt("", ""); // uses SSID/PWD stored in ESP32 secret memory.....
@@ -1839,6 +1542,8 @@ void setup()
 
   m_websocketserver.begin();
   m_websocketserver.onEvent(onWebSocketEvent); // Start WebSocket server and assign callback
+
+  delay(1000);
 
   // wifiClient.setInsecure();
   Serial.println(WiFi.localIP());
@@ -1891,11 +1596,12 @@ void setup()
   xTaskCreate(vTransit, "Transit", 1024, NULL, 3, NULL);
   // xTaskCreate(vStopper, "Stopper", 1024, NULL, 4, NULL);
   xTaskCreate(vLanding, "Landing", 2048, NULL, 4, &xLandingHandle);
-  xTaskCreate(vStatusLogger, "StatusLogger", 2048, NULL, 2, NULL);
+  xTaskCreate(vStatusLogger, "StatusLogger", 4096, NULL, 2, NULL);
 
   Serial.print("Heap free memory (in bytes)= ");
   Serial.println(ESP.getFreeHeap());
   Serial.println(F("Setup complete."));
+  delay(1000);
 }
 
 void loop()
@@ -1912,23 +1618,8 @@ void loop()
 
   m_websocketserver.loop();
 
-  if (m_send_websocket_test_data_in_loop == true) // do things here in loop at full speed
-  {
-    // Pseudocode: xxx_period_in_ms_xxx=period_in_s * 1e3 = (1/freqHz)*1e3
-    if (millis() - last_time_sent_websocket_server > (1000 / m_websocket_send_rate)) // every half second, print
-    {
-      //sendTimeOverWebsocketJSON();
-      sendValueOverWebsocketJSON(100 * 0.5 * sin(millis() / 1e3)); // value is sine wave of time , frequency 0.5 Hz, amplitude 100.
-      last_time_sent_websocket_server = millis();
-    }
-    // m_microsbefore_websocketsendcalled=micros();
-    // sendTimeOverWebsocketJSON(); // takes 2.5 ms on average, when client is connected, else 45 microseconds...
-    // Serial.println(micros()-m_microsbefore_websocketsendcalled);
-  }
-
-  int curr_pos = readFileAsInt(SPIFFS, "/current_pos.txt");
   Serial.print("curr_pos in fs: ");
-  Serial.print(curr_pos);
+  Serial.print(POS);  
 
   if (btwFloor == true)
   {
@@ -1941,5 +1632,5 @@ void loop()
 
   Serial.println("----------");
   vTaskDelay(5000);
-  last_time_loop_called = millis();
+  // last_time_loop_called = millis();
 }
