@@ -144,6 +144,11 @@ volatile uint8_t TARGET = -1;
 volatile unsigned long lastFloorISR_1 = 0;
 volatile unsigned long lastFloorISR_2 = 0;
 volatile unsigned long lastFloorISR_3 = 0;
+volatile unsigned long lastLowerLim = 0;
+volatile unsigned long lastUpperLim = 0;
+
+
+
 volatile unsigned long lastNoPowerISR = 0;
 volatile unsigned long lastResetSysISR = 0;
 bool emergency = false;
@@ -1509,7 +1514,7 @@ void vTransit(void *arg)
       publish_status.state = MOVING;
       hasChanged = true;
 
-      xTimerStart(xStopTransit, 0);
+      xTimerStart(xStopTransitTimer, 0);
     }
   }
 }
@@ -1650,14 +1655,16 @@ void vReceive(void *arg)
           POS = 1;
         }
         Serial.println("received toFloor1 cmd");
-        publish_status.cmd = "toFloor1";
+        // publish_status.cmd = "toFloor1";
+        strcpy(publish_status.cmd, "toFloor1" );
         if (moving_state == IDLE)
           xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
         break;
       case toFloor2:
         cmd_buf = 2;
         Serial.println("received toFloor2 cmd");
-        publish_status.cmd = "toFloor2";
+        strcpy(publish_status.cmd, "toFloor2" );
+        // publish_status.cmd = "toFloor2";
         if (moving_state == IDLE)
           xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
         break;
