@@ -15,10 +15,9 @@
 #include "SPIFFS.h"
 
 
-
 // gpio
-#define PIN_RX 16
-#define PIN_TX 15
+#define PIN_RX 16   //15
+#define PIN_TX 15   //5
 #define WIFI_READY 22
 
 #define RFReceiver 23
@@ -27,7 +26,7 @@
 #define R_UP 19      // Relay UP
 #define R_DW 18      // Relay DOWN
 #define MOVING_DW 17 // Relay 4
-#define BRK 5        // brake
+#define BRK 5        // brake            //16  
 #define NP 25
 #define CS 21
 #define RST_SYS 4
