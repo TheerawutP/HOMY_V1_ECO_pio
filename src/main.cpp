@@ -13,34 +13,43 @@
 #include "RCSwitch.h"
 #include "FS.h"
 #include "SPIFFS.h"
-
+#include <ModbusMaster.h>
 
 // gpio
-#define PIN_RX 16   //15
-#define PIN_TX 15   //5
+#define PIN_RX 16 // 15
+#define PIN_TX 15 // 5
 #define WIFI_READY 22
 
 #define RFReceiver 23
 #define floorSensor1 32
 #define floorSensor2 33
-#define R_UP 19      // Relay UP
-#define R_DW 18      // Relay DOWN
-#define MOVING_DW 17 // Relay 4
-#define BRK 5        // brake            //16  
+#define R_UP 19        // Relay UP
+#define R_DW 18        // Relay DOWN
+#define R_POWER_CUT 17 // Relay 4
+#define BRK 5          // brake        //16
 #define NP 25
 #define CS 21
 #define RST_SYS 4
 
+#define MB_RX 26
+#define MB_TX 27
+
 #define toFloor1 174744
 #define toFloor2 174740
-// #define toFloor3 174738
+#define POWER_CUT 174738
 #define STOP 174737
 #define DEBOUNCE_MS 200
 #define BRAKE_MS 2000
-#define WAIT_MS 1000
-#define MAX_FLOOR 2
+#define WAIT_MS 300
+#define POWER_CUT_MS 3000
+uint8_t MAX_FLOOR = 2;
 #define MIN_FLOOR 1
-#define FloorToFloor_MS 18500   //only for up dir
+uint32_t FloorToFloor_MS = 18500; // only for up dir
+
+#define Inverter_slaveID 1
+#define H0_INV 28672
+#define INV_NUM 19
+
 enum direction_t
 {
   UP,
@@ -61,6 +70,13 @@ enum elevatorMode_t
   EMERGENCY
 };
 
+enum read_state
+{
+  PLC,
+  INV,
+};
+read_state curr_slave = INV;
+
 const char *mqtt_broker = "kit.flinkone.com";
 const int mqtt_port = 1883; // unencrypt
 
@@ -71,6 +87,7 @@ char *system_status = "/sys_v2";
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
+ModbusMaster node;
 
 SemaphoreHandle_t mqttMutex; // Mutex to protect MQTT client
 SemaphoreHandle_t hasChangedMutex;
@@ -82,6 +99,7 @@ SemaphoreHandle_t xSemLanding;
 TimerHandle_t xDisbrakeTimer;
 TimerHandle_t xWaitTimer;
 TimerHandle_t xStopTransitTimer;
+TimerHandle_t xPowerCutTimer;
 TaskHandle_t xLandingHandle;
 TaskHandle_t xPublishHandle;
 SemaphoreHandle_t xTransitMutex;
@@ -143,12 +161,16 @@ volatile unsigned long lastFloorISR_2 = 0;
 volatile unsigned long lastFloorISR_3 = 0;
 volatile unsigned long lastLowerLim = 0;
 volatile unsigned long lastUpperLim = 0;
-
 volatile unsigned long lastNoPowerISR = 0;
 volatile unsigned long lastResetSysISR = 0;
 bool emergency = false;
 bool btwFloor = false;
 direction_t lastDir = UP;
+uint8_t lastTarget = 0;
+int hreg[8][32];
+// bool wait_execution = false;
+bool ws_cmd = false;
+uint32_t ws_cmd_value = 0;
 
 //******************* END VARIABLE DECLARATIONS**************************
 
@@ -157,13 +179,11 @@ inline void ROTATE(direction_t dir)
   if (dir == UP)
   {
     digitalWrite(R_UP, HIGH);
-    digitalWrite(MOVING_DW, LOW);
     Serial.println("Move UP");
   }
   else if (dir == DOWN)
   {
     digitalWrite(R_DW, HIGH);
-    digitalWrite(MOVING_DW, HIGH);
     Serial.println("Move DOWN");
   }
 }
@@ -190,21 +210,18 @@ inline void M_STP()
 {
   digitalWrite(R_UP, LOW);
   digitalWrite(R_DW, LOW);
-  digitalWrite(MOVING_DW, LOW);
   Serial.println("Motor Stop");
 }
 
 inline void M_UP()
 {
   digitalWrite(R_UP, HIGH);
-  digitalWrite(MOVING_DW, LOW);
   Serial.println("Move UP");
 }
 
 inline void M_DW()
 {
   digitalWrite(R_DW, HIGH);
-  digitalWrite(MOVING_DW, HIGH);
   Serial.println("Move Down");
 }
 
@@ -213,7 +230,7 @@ inline int BrkState()
   return digitalRead(BRK);
 }
 
-String statusToJson(const status_t status)
+String statusToJson_ELE(const status_t status)
 {
   // Create a JSON document (adjust size if needed, 256 is usually enough for this struct)
   // Note: Use StaticJsonDocument<256> if you are on ArduinoJson v6
@@ -243,10 +260,48 @@ String statusToJson(const status_t status)
   return jsonOutput;
 }
 
+String statusToJson_INV(int *status)
+{
+  // JsonDocument doc;
+  StaticJsonDocument<512> doc;
+
+  doc["Running 0.01Hz"] = status[0];
+  doc["Setting 0.01Hz"] = status[1];
+  doc["Bus 0.1V"] = status[2];
+  doc["Out V"] = status[3];
+
+  doc["Out 0.01A"] = status[4];
+  doc["Power 0.1kW"] = status[5];
+  doc["Torque 0.1%"] = status[6];
+  doc["DI input state"] = status[7];
+
+  doc["D0 input state"] = status[8];
+  doc["AI1 0.01V"] = status[9];
+  doc["AI2 V/A"] = status[10];
+  doc["Panal 0.1V"] = status[11];
+
+  doc["Count"] = status[12];
+  doc["Length"] = status[13];
+  doc["Display Hz"] = status[14];
+  doc["PID setting"] = status[15];
+
+  doc["PID feedback"] = status[16];
+  doc["PLC state"] = status[17];
+  doc["HDI input 0.01Hz"] = status[18];
+  doc["Feedback 0.01Hz"] = status[19];
+
+  // Serialize into a String
+  String jsonOutput;
+  serializeJson(doc, jsonOutput);
+
+  return jsonOutput;
+}
+
 void setupMQTT()
 {
   mqttClient.setServer(mqtt_broker, mqtt_port);
   // mqttClient.setCallback(callback);
+  mqttClient.setBufferSize(1024);
 }
 
 void reconnect()
@@ -709,6 +764,99 @@ void runWifiPortal_after_connected_to_WIFI()
   }
 }
 
+void handle_websocket_text(uint8_t *payload)
+{
+  // do something...
+  Serial.printf("handle_websocket_text called for: %s\n", payload);
+
+  // Parse JSON payload
+  StaticJsonDocument<1000> m_JSONdoc_from_payload;
+  DeserializationError m_error = deserializeJson(m_JSONdoc_from_payload, payload); // m_JSONdoc is now a json object
+  if (m_error)
+  {
+    Serial.println("deserializeJson() failed with code ");
+    Serial.println(m_error.c_str());
+  }
+
+  JsonObject m_JsonObject_from_payload = m_JSONdoc_from_payload.as<JsonObject>();
+
+  for (JsonPair keyValue : m_JsonObject_from_payload)
+  {
+    String m_key_string = keyValue.key().c_str();
+
+    if (m_key_string == "change_floor_number_to")
+    {
+      Serial.println("change_floor_number_to called");
+      int m_new_floor_number = m_JSONdoc_from_payload["change_floor_number_to"];
+      Serial.println(m_new_floor_number);
+      MAX_FLOOR = m_new_floor_number;
+
+      // if (Sweep_Mode == CTLPANEL)
+      // {
+      //   // set cell voltage, send params back to browswer such as percentage and dac settings
+      //   Serial.println("Calling setLMPBias and setVoltage to:");
+      //   Serial.println(cell_voltage_control_panel);
+      //   setLMPBias(cell_voltage_control_panel);
+      //   setVoltage(cell_voltage_control_panel);
+      //   // send percent setting, dacvout back to browswer xyzxyz
+      //   temp_json_string = "{\"dacVout\":";
+      //   temp_json_string += String(dacVout, DEC);
+      //   temp_json_string += ",\"percentage\":";
+      //   temp_json_string += String(TIA_BIAS[bias_setting]);
+      //   temp_json_string += "}";
+      //   m_websocketserver.broadcastTXT(temp_json_string.c_str(), temp_json_string.length());
+      // }
+    }
+
+    if (m_key_string == "change_up_duration_to")
+    {
+      Serial.println("change_up_duration_to called");
+      int m_new_up_duration = m_JSONdoc_from_payload["change_up_duration_to"];
+      Serial.println(m_new_up_duration);
+      FloorToFloor_MS = m_new_up_duration;
+    }
+
+    // if (m_key_string == "change_down_duration_to")
+    // {
+    //   Serial.println("change_down_duration_to called");
+    //   int m_new_down_duration = m_JSONdoc_from_payload["change_down_duration_to"];
+    //   Serial.println(m_new_down_duration);
+    //   FloorToFloor_MS = m_new_down_duration;
+    // }
+
+    // if (m_key_string == "change_lmpGain_to")
+    // {
+    //   Serial.println("change_lmpGain_to called");
+    //   int m_new_lmpGain = m_JSONdoc_from_payload["change_lmpGain_to"];
+    //   LMPgainGLOBAL = m_new_lmpGain;
+    //   if (Sweep_Mode == CTLPANEL)
+    //   {
+    //     Serial.println(LMPgainGLOBAL);
+    //     pStat.setGain(LMPgainGLOBAL);
+    //   }
+    // }
+
+    // change_control_panel_is_active_to
+    // if (m_key_string == "change_control_panel_is_active_to")
+    // {
+    //   Serial.println("change_control_panel_is_active_to called");
+    //   bool m_new_control_panel_active_state = m_JSONdoc_from_payload["change_control_panel_is_active_to"];
+    //   Serial.println(m_new_control_panel_active_state);
+    //   if (m_new_control_panel_active_state)
+    //   {
+    //     Sweep_Mode = CTLPANEL;
+    //     send_is_sweeping_status_over_websocket(true);
+    //   }
+    //   if (!m_new_control_panel_active_state)
+    //   {
+    //     Sweep_Mode = dormant;
+    //     send_is_sweeping_status_over_websocket(false);
+    //   }
+    //   // set control panel to active or inactive, depending on message
+    // }
+  }
+}
+
 void onWebSocketEvent(uint8_t num,
                       WStype_t type,
                       uint8_t *payload,
@@ -734,17 +882,17 @@ void onWebSocketEvent(uint8_t num,
   break;
 
   // Echo text message back to client
-  // case WStype_TEXT:
-  //   // Serial.println(payload[0,length-1]); // this doesn't work....
-  //   Serial.printf("[%u] Received text: %s\n", num, payload);
-  //   // m_websocketserver.sendTXT(num, payload);
-  //   // if (true == false) // later change to if message has certain format:
-  //   // {
-  //   //   m_websocket_send_rate = (float)atof((const char *)&payload[0]); // adjust data send rate used in loop
-  //   // }
-  //   handle_websocket_text(payload);
+  case WStype_TEXT:
+    // Serial.println(payload[0,length-1]); // this doesn't work....
+    Serial.printf("[%u] Received text: %s\n", num, payload);
+    // m_websocketserver.sendTXT(num, payload);
+    // if (true == false) // later change to if message has certain format:
+    // {
+    //   m_websocket_send_rate = (float)atof((const char *)&payload[0]); // adjust data send rate used in loop
+    // }
+    handle_websocket_text(payload);
 
-  //   break;
+    break;
 
   // For everything else: do nothing
   case WStype_BIN:
@@ -758,8 +906,6 @@ void onWebSocketEvent(uint8_t num,
   }
 }
 
-
-
 void configureserver()
 // configures server
 {
@@ -768,136 +914,137 @@ void configureserver()
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, PUT");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "*");
 
-
-
   // Button #1
-  server.addHandler(new AsyncCallbackJsonWebHandler("/button1pressed", [](AsyncWebServerRequest *request1, JsonVariant &json1)
+  server.addHandler(new AsyncCallbackJsonWebHandler("/on_Button_UP_pressed", [](AsyncWebServerRequest *request1, JsonVariant &json1)
                                                     {
                                                       const JsonObject &jsonObj1 = json1.as<JsonObject>();
                                                       if (jsonObj1["on"])
                                                       {
-                                                        Serial.println("Button 1 pressed. Running CV sweep.");
-                                                        // digitalWrite(LEDPIN, HIGH);
-
+                                                        Serial.println("Up button pressed.");
+                                                        ws_cmd = true;
+                                                        ws_cmd_value = toFloor2;
                                                       }
                                                       request1->send(200, "OK"); }));
+
   // Button #2
-  server.addHandler(new AsyncCallbackJsonWebHandler("/button2pressed", [](AsyncWebServerRequest *request2, JsonVariant &json2)
+  server.addHandler(new AsyncCallbackJsonWebHandler("/on_Button_DOWN_pressed", [](AsyncWebServerRequest *request2, JsonVariant &json2)
                                                     {
                                                       const JsonObject &jsonObj2 = json2.as<JsonObject>();
                                                       if (jsonObj2["on"])
                                                       {
-                                                        Serial.println("Button 2 pressed. Running NPV sweep.");
-                                                        // digitalWrite(LEDPIN, HIGH);
- 
+                                                        Serial.println("Down button pressed.");
+                                                        ws_cmd = true;
+                                                        ws_cmd_value = toFloor1;
                                                       }
                                                       request2->send(200, "OK"); }));
 
   // Button #11
-  server.addHandler(new AsyncCallbackJsonWebHandler("/button11pressed", [](AsyncWebServerRequest *request2, JsonVariant &json2)
-                                                    {
-    const JsonObject &jsonObj2 = json2.as<JsonObject>();
-    if (jsonObj2["on"])
-    {
-      Serial.println("Button 11 pressed. Running DPV sweep.");
-      // digitalWrite(LEDPIN, HIGH);
+  // server.addHandler(new AsyncCallbackJsonWebHandler("/button11pressed", [](AsyncWebServerRequest *request2, JsonVariant &json2)
+  //                                                   {
+  //   const JsonObject &jsonObj2 = json2.as<JsonObject>();
+  //   if (jsonObj2["on"])
+  //   {
+  //     Serial.println("Button 11 pressed. Running DPV sweep.");
+  //     // digitalWrite(LEDPIN, HIGH);
 
-    }
-    request2->send(200, "OK"); }));
+  //   }
+  //   request2->send(200, "OK"); }));
   // Button #3
-  server.addHandler(new AsyncCallbackJsonWebHandler("/button3pressed", [](AsyncWebServerRequest *request3, JsonVariant &json3)
+  server.addHandler(new AsyncCallbackJsonWebHandler("/on_Button_STOP_pressed", [](AsyncWebServerRequest *request3, JsonVariant &json3)
                                                     {
                                                       const JsonObject &jsonObj3 = json3.as<JsonObject>();
                                                       if (jsonObj3["on"])
                                                       {
-                                                        Serial.println("Button 3 pressed. Running SQV sweep.");
-                                                        // digitalWrite(LEDPIN, HIGH);
-
+                                                        Serial.println("stop button pressed. Stopping all movement!");
+                                                        ws_cmd = true;
+                                                        ws_cmd_value = STOP;
                                                       }
                                                       request3->send(200, "OK"); }));
+
   // Button #4
-  server.addHandler(new AsyncCallbackJsonWebHandler("/button4pressed", [](AsyncWebServerRequest *request4, JsonVariant &json4)
+  server.addHandler(new AsyncCallbackJsonWebHandler("/on_Button_EMERGENCY_pressed", [](AsyncWebServerRequest *request4, JsonVariant &json4)
                                                     {
                                                       const JsonObject &jsonObj4 = json4.as<JsonObject>();
                                                       if (jsonObj4["on"])
                                                       {
-                                                        Serial.println("Button 4 pressed. Running CA sweep.");
-                                                        // digitalWrite(LEDPIN, HIGH);
-  
+                                                        Serial.println("Emergency button pressed. Stopping all movement immediately!");
+                                                        ws_cmd = true;
+                                                        ws_cmd_value = POWER_CUT;
                                                       }
                                                       request4->send(200, "OK"); }));
+
   // Button #5
-  server.addHandler(new AsyncCallbackJsonWebHandler("/button5pressed", [](AsyncWebServerRequest *request5, JsonVariant &json5)
-                                                    {
-                                                      const JsonObject &jsonObj5 = json5.as<JsonObject>();
-                                                      if (jsonObj5["on"])
-                                                      {
-                                                        Serial.println("Button 5 pressed. Running DC sweep.");
-                                                        // digitalWrite(LEDPIN, HIGH);
+  // server.addHandler(new AsyncCallbackJsonWebHandler("/button5pressed", [](AsyncWebServerRequest *request5, JsonVariant &json5)
+  //                                                   {
+  //                                                     const JsonObject &jsonObj5 = json5.as<JsonObject>();
+  //                                                     if (jsonObj5["on"])
+  //                                                     {
+  //                                                       Serial.println("Button 5 pressed. Running DC sweep.");
+  //                                                       // digitalWrite(LEDPIN, HIGH);
 
-                                                      }
-                                                      request5->send(200, "OK"); }));
-  // Button #6
-  server.addHandler(new AsyncCallbackJsonWebHandler("/button6pressed", [](AsyncWebServerRequest *request6, JsonVariant &json6)
-                                                    {
-                                                      const JsonObject &jsonObj6 = json6.as<JsonObject>();
-                                                      if (jsonObj6["on"])
-                                                      {
-                                                        Serial.println("Button 6 pressed. Running IV sweep.");
-                                                        // digitalWrite(LEDPIN, HIGH);
+  //                                                     }
+  //                                                     request5->send(200, "OK"); }));
+  // // Button #6
+  // server.addHandler(new AsyncCallbackJsonWebHandler("/button6pressed", [](AsyncWebServerRequest *request6, JsonVariant &json6)
+  //                                                   {
+  //                                                     const JsonObject &jsonObj6 = json6.as<JsonObject>();
+  //                                                     if (jsonObj6["on"])
+  //                                                     {
+  //                                                       Serial.println("Button 6 pressed. Running IV sweep.");
+  //                                                       // digitalWrite(LEDPIN, HIGH);
 
-                                                      }
-                                                      request6->send(200, "OK"); }));
+  //                                                     }
+  //                                                     request6->send(200, "OK"); }));
 
-  // Button #7
-  server.addHandler(new AsyncCallbackJsonWebHandler("/button7pressed", [](AsyncWebServerRequest *request7, JsonVariant &json7)
-                                                    {
-                                                      const JsonObject &jsonObj7 = json7.as<JsonObject>();
-                                                      if (jsonObj7["on"])
-                                                      {
-                                                        Serial.println("Button 7 pressed. Running CAL sweep.");
-                                                        // digitalWrite(LEDPIN, HIGH);
- 
-                                                      }
-                                                      request7->send(200, "OK"); }));
-  // Button #8
-  server.addHandler(new AsyncCallbackJsonWebHandler("/button8pressed", [](AsyncWebServerRequest *request8, JsonVariant &json8)
-                                                    {
-                                                      const JsonObject &jsonObj8 = json8.as<JsonObject>();
-                                                      if (jsonObj8["on"])
-                                                      {
-                                                        Serial.println("Button 8 pressed. Running MISC_MODE sweep.");
-                                                        // digitalWrite(LEDPIN, HIGH);
+  // // Button #7
+  // server.addHandler(new AsyncCallbackJsonWebHandler("/button7pressed", [](AsyncWebServerRequest *request7, JsonVariant &json7)
+  //                                                   {
+  //                                                     const JsonObject &jsonObj7 = json7.as<JsonObject>();
+  //                                                     if (jsonObj7["on"])
+  //                                                     {
+  //                                                       Serial.println("Button 7 pressed. Running CAL sweep.");
+  //                                                       // digitalWrite(LEDPIN, HIGH);
 
-                                                      }
-                                                      request8->send(200, "OK"); }));
-  // Button #9
-  server.addHandler(new AsyncCallbackJsonWebHandler("/button9pressed", [](AsyncWebServerRequest *request9, JsonVariant &json9)
-                                                    {
-                                                      const JsonObject &jsonObj9 = json9.as<JsonObject>();
-                                                      if (jsonObj9["on"])
-                                                      {
-                                                        Serial.println("Button 9 pressed.");
-                                                        // digitalWrite(LEDPIN, HIGH);
+  //                                                     }
+  //                                                     request7->send(200, "OK"); }));
+  // // Button #8
+  // server.addHandler(new AsyncCallbackJsonWebHandler("/button8pressed", [](AsyncWebServerRequest *request8, JsonVariant &json8)
+  //                                                   {
+  //                                                     const JsonObject &jsonObj8 = json8.as<JsonObject>();
+  //                                                     if (jsonObj8["on"])
+  //                                                     {
+  //                                                       Serial.println("Button 8 pressed. Running MISC_MODE sweep.");
+  //                                                       // digitalWrite(LEDPIN, HIGH);
 
-                                                      }
-                                                      request9->send(200, "OK"); }));
-  // Button #10
-  server.addHandler(new AsyncCallbackJsonWebHandler("/button10pressed", [](AsyncWebServerRequest *request10, JsonVariant &json10)
-                                                    {
-                                                      const JsonObject &jsonObj10 = json10.as<JsonObject>();
-                                                      if (jsonObj10["on"])
-                                                      {
-                                                        Serial.println("Button 10 pressed.");
-                                                        // digitalWrite(LEDPIN, HIGH);
+  //                                                     }
+  //                                                     request8->send(200, "OK"); }));
+  // // Button #9
+  // server.addHandler(new AsyncCallbackJsonWebHandler("/button9pressed", [](AsyncWebServerRequest *request9, JsonVariant &json9)
+  //                                                   {
+  //                                                     const JsonObject &jsonObj9 = json9.as<JsonObject>();
+  //                                                     if (jsonObj9["on"])
+  //                                                     {
+  //                                                       Serial.println("Button 9 pressed.");
+  //                                                       // digitalWrite(LEDPIN, HIGH);
 
-                                                      }
-                                                      request10->send(200, "OK"); }));
+  //                                                     }
+  //                                                     request9->send(200, "OK"); }));
+  // // Button #10
+  // server.addHandler(new AsyncCallbackJsonWebHandler("/button10pressed", [](AsyncWebServerRequest *request10, JsonVariant &json10)
+  //                                                   {
+  //                                                     const JsonObject &jsonObj10 = json10.as<JsonObject>();
+  //                                                     if (jsonObj10["on"])
+  //                                                     {
+  //                                                       Serial.println("Button 10 pressed.");
+  //                                                       // digitalWrite(LEDPIN, HIGH);
+
+  //                                                     }
+  //                                                     request10->send(200, "OK"); }));
 
   server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
 
-  server.on("/downloadfile", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(SPIFFS, "/data.txt", "text/plain", true); });
+  // server.on("/downloadfile", HTTP_GET, [](AsyncWebServerRequest *request)
+  //           { request->send(SPIFFS, "/data.txt", "text/plain", true); });
 
   server.on("/rebootnanostat", HTTP_GET, [](AsyncWebServerRequest *request)
             {
@@ -962,8 +1109,6 @@ void configureserver()
               // request->send(200, "text/HTML", "Sweep data saved. Click <a href=\"/index.html\">here</a> to return to main page.");
               request->send(200, "text/HTML", "  <head> <meta http-equiv=\"refresh\" content=\"2; URL=index.html\" /> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"> </head> <body> <h1> Settings saved! </h1> <p> Returning to main page. </p> </body>");
               // request->send(200, "OK");
-
-
             });
 
   // Wifitools stuff:
@@ -974,7 +1119,6 @@ void configureserver()
   // Wifi scan:
   server.on("/wifiScan.json", HTTP_GET, [](AsyncWebServerRequest *request)
             { getWifiScanJson(request); });
-
 
   server.begin();
 }
@@ -1012,7 +1156,7 @@ void vStatusLogger(void *arg)
     // if(POS != lastPOS)
     {
 
-      saveStatus(); 
+      saveStatus();
 
       lastPOS = POS;
       // lastBtw = btwFloor;
@@ -1063,7 +1207,6 @@ bool readSSIDPWDfile(String m_pwd_filename_to_read)
   String m_PWD2_name = m_JSONdoc_from_pwd_file["PWD1"];
   String m_PWD3_name = m_JSONdoc_from_pwd_file["PWD1"];
 
-
   // Try connecting:
   //****************************8
   if (connectAttempt(m_SSID1_name, m_PWD1_name))
@@ -1084,6 +1227,33 @@ bool readSSIDPWDfile(String m_pwd_filename_to_read)
   Serial.println("Failed to connect.");
 
   return false;
+}
+
+void vUpdatePage(void *pvParams)
+{
+  for (;;)
+  {
+    m_websocketserver.loop();
+
+    temp_json_string = "{\"floorValue\":";
+    temp_json_string += String(POS);
+    temp_json_string += ",\"Up\":";
+    temp_json_string += String(publish_status.dir == UP ? "true" : "false");
+    temp_json_string += ",\"Down\":";
+    temp_json_string += String(publish_status.dir == DOWN ? "true" : "false");
+    temp_json_string += ",\"BtwFloor\":";
+    temp_json_string += String(publish_status.btwFloor ? "true" : "false");
+    temp_json_string += ",\"Moving\":";
+    temp_json_string += String(publish_status.state == MOVING ? "true" : "false");
+    temp_json_string += ",\"TargetFloor\":";
+    temp_json_string += String(publish_status.targetFloor);
+    temp_json_string += ",\"Mode\":";
+    temp_json_string += String(publish_status.mode == NORMAL ? "\"NORMAL\"" : "\"EMERGENCY\"");
+    temp_json_string += "}";
+
+    m_websocketserver.broadcastTXT(temp_json_string.c_str(), temp_json_string.length());
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
 }
 
 void vReconnectTask(void *pvParams)
@@ -1135,13 +1305,60 @@ void vPublishTask(void *pvParams)
       if (hasChanged == true)
       {
 
-        String status_payload = statusToJson(publish_status);
-        publishMqtt("kit/UT_500", status_payload.c_str());
+        String status_payload = statusToJson_ELE(publish_status);
+        publishMqtt("kit/UT_500/sys_v2/ele_status", status_payload.c_str());
         hasChanged = false;
       }
       xSemaphoreGive(hasChangedMutex);
     }
     vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+void vPublishInverterTask(void *pvParams)
+{
+  for (;;)
+  {
+    if ((hreg[Inverter_slaveID][7] != 992) && (hreg[Inverter_slaveID][7] != 0))
+    {
+      String inverter_payload = statusToJson_INV(hreg[Inverter_slaveID]);
+      publishMqtt("kit/UT_500/sys_v2/inveter_status", inverter_payload.c_str());
+    }
+    vTaskDelay(pdMS_TO_TICKS(500));
+  }
+}
+
+void vPollingTask(void *pvParams)
+{
+  for (;;)
+  {
+    uint32_t result;
+    // if (xSemaphoreTake(hregMutex, portMAX_DELAY) == pdTRUE) {
+    digitalWrite(WIFI_READY, HIGH);
+    switch (curr_slave)
+    {
+    case INV:
+      node.begin(Inverter_slaveID, Serial1);
+      result = node.readHoldingRegisters(H0_INV, INV_NUM); // start hreg address, num of read
+      if (result == node.ku8MBSuccess)
+      {
+        for (int i = 0; i < INV_NUM; i++)
+        {
+          hreg[Inverter_slaveID][i] = node.getResponseBuffer(i);
+        }
+      }
+      else
+      {
+        Serial.println(result); // Check this code for timeouts (226) or invalid data (227)
+      }
+      // last_slave = INV;
+      // curr_slave = PLC;
+      break;
+    }
+
+    //   xSemaphoreGive(hregMutex);
+    // }
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
@@ -1158,11 +1375,12 @@ void vTransit(void *arg)
       }
       // BRK_OFF();
       Serial.println("start transit");
+      ;
       moving_state = MOVING;
       ROTATE(transit.dir);
-      
-      if(transit.dir == UP) xTimerStart(xStopTransitTimer, 0);
-      
+
+      if (transit.dir == UP)
+        xTimerChangePeriod(xStopTransitTimer, pdMS_TO_TICKS(FloorToFloor_MS), 0);
       // publish_status.isBrake = false;
       publish_status.state = MOVING;
       hasChanged = true;
@@ -1192,10 +1410,13 @@ void vGetDirection(void *arg)
       {
         if (btwFloor == true)
         {
-          if (lastDir == UP)
-            transit.dir = DOWN;
-          if (lastDir == DOWN)
-            transit.dir = UP;
+          // if (lastDir == UP)
+          //   transit.dir = DOWN;
+          // if (lastDir == DOWN)
+          //   transit.dir = UP;
+          // transit.floor = target;
+          if(lastTarget > POS) transit.dir = DOWN;
+          if(lastTarget < POS) transit.dir = UP;
           transit.floor = target;
           xTimerStart(xWaitTimer, 0);
         }
@@ -1214,46 +1435,83 @@ void vGetDirection(void *arg)
   }
 }
 
+// void vLanding(void *arg)
+// {
+//   for (;;)
+//   {
+//     if (xSemaphoreTake(xSemLanding, portMAX_DELAY) == pdTRUE)
+//     {
+
+//       if (POS == 1 && emergency == 1)
+//       {
+//         Serial.println("finish Safety landing");
+//         // M_STP();
+//         BRK_OFF();
+//         emergency = false;
+//         publish_status.mode = NORMAL;
+//         publish_status.isBrake = false;
+//         hasChanged = true;
+//         xTimerStop(xDisbrakeTimer, 0);
+//         vTaskSuspend(NULL);
+//       }
+
+//       BRK_ON();
+//       publish_status.targetFloor = 1;
+//       publish_status.isBrake = true;
+//       hasChanged = true;
+//       xTimerStart(xDisbrakeTimer, 0);
+//     }
+//   }
+// }
+
 void vLanding(void *arg)
 {
   for (;;)
   {
     if (xSemaphoreTake(xSemLanding, portMAX_DELAY) == pdTRUE)
     {
-
-      if (POS == 1 && emergency == 1)
+      if (POS == MIN_FLOOR)
       {
         Serial.println("finish Safety landing");
-        // M_STP();
         BRK_OFF();
         emergency = false;
         publish_status.mode = NORMAL;
         publish_status.isBrake = false;
         hasChanged = true;
-        xTimerStop(xDisbrakeTimer, 0);
         vTaskSuspend(NULL);
+        continue;
       }
 
       BRK_ON();
       publish_status.targetFloor = 1;
       publish_status.isBrake = true;
       hasChanged = true;
-      xTimerStart(xDisbrakeTimer, 0);
+
+      vTaskDelay(pdMS_TO_TICKS(2000));
+
+      BRK_OFF();
+      publish_status.isBrake = false;
+      hasChanged = true;
+
+      vTaskDelay(pdMS_TO_TICKS(500));
+
+      xSemaphoreGive(xSemLanding);
     }
   }
 }
 
-void vDisbrake(TimerHandle_t xTimer)
-{
-  BRK_OFF();
-  delay(500);
-  publish_status.isBrake = false;
-  hasChanged = true;
-  xSemaphoreGive(xSemLanding);
-}
+// void vDisbrake(TimerHandle_t xTimer)
+// {
+//   BRK_OFF();
+//   delay(500);
+//   publish_status.isBrake = false;
+//   hasChanged = true;
+//   xSemaphoreGive(xSemLanding);
+// }
 
 void vWaitToTransit(TimerHandle_t xTimer)
 {
+  Serial.println("Wait time over, start transit");
   xSemaphoreGive(xSemTransit);
 }
 
@@ -1274,65 +1532,211 @@ void vStopTransit(TimerHandle_t xTimer)
   hasChanged = true;
 }
 
+// void vReceive(void *arg)
+// {
+//   int cmd_buf;
+//   for (;;)
+//   {
+//     int cmd = 0;
+//     bool commandReceived = false;
+
+//     if (RF.available())
+//     {
+//       cmd = RF.getReceivedValue();
+//       RF.resetAvailable();
+//       commandReceived = true;
+//     }
+
+//     if (ws_cmd == true)
+//     {
+//       ws_cmd = false;
+//       cmd = ws_cmd_value;
+//       commandReceived = true;
+//     }
+
+//     if (commandReceived && (emergency == false))
+//     {
+//       switch (cmd)
+//       {
+//       case toFloor1:
+//         cmd_buf = 1;
+//         if (POS == 0)
+//         {
+//           POS = 1;
+//         }
+//         Serial.println("received toFloor1 cmd");
+//         strcpy(publish_status.cmd, "toFloor1");
+//         if (moving_state == IDLE)
+//           xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
+//         break;
+
+//       case toFloor2:
+//         cmd_buf = 2;
+//         Serial.println("received toFloor2 cmd");
+//         strcpy(publish_status.cmd, "toFloor2");
+//         if (moving_state == IDLE)
+//           xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
+//         break;
+
+//       case POWER_CUT:
+//         Serial.println("received POWER CUT! cmd");
+//         strcpy(publish_status.cmd, "POWER_CUT!");
+//         // emergency = true;
+//         // publish_status.mode = EMERGENCY;
+//         // publish_status.targetFloor = MIN_FLOOR;
+//         // publish_status.state = MOVING;
+//         // hasChanged = true;
+//         digitalWrite(R_POWER_CUT, HIGH);
+//         break;
+
+//       case STOP:
+//         if (moving_state != IDLE)
+//         {
+//           strcpy(publish_status.cmd, "STOP");
+//           Serial.println("received STOP cmd");
+//           xTimerStop(xStopTransitTimer, 0);
+
+//           // POS = (POS+TARGET)/2; // update current position to be between current and target
+//           btwFloor = true;
+//           M_STP();
+//           BRK_ON();
+//           xQueueReset(xQueueGetDirection);
+//           TARGET = 0;
+//           moving_state = IDLE;
+//           lastDir = transit.dir;
+
+//           publish_status.btwFloor = btwFloor;
+//           publish_status.targetFloor = 0;
+//           publish_status.state = IDLE;
+//           publish_status.isBrake = true;
+//         }
+//         break;
+//       }
+
+//       hasChanged = true;
+//     }
+
+//     vTaskDelay(pdMS_TO_TICKS(50));
+//   }
+// }
 void vReceive(void *arg)
 {
   int cmd_buf;
+
+  static unsigned long lastTimeCmd1 = 0;
+  static unsigned long lastTimeCmd2 = 0;
+  const unsigned long DEBOUNCE_DELAY = 5000; 
+
   for (;;)
   {
+    int cmd = 0;
+    bool commandReceived = false;
+    unsigned long now = millis(); 
+
     if (RF.available())
     {
-      int cmd = RF.getReceivedValue();
+      cmd = RF.getReceivedValue();
       RF.resetAvailable();
+      commandReceived = true;
+    }
+
+    if (ws_cmd == true)
+    {
+      ws_cmd = false;
+      cmd = ws_cmd_value;
+      commandReceived = true;
+    }
+
+    if (commandReceived && (emergency == false))
+    {
       switch (cmd)
       {
-      case toFloor1: // from A
-        cmd_buf = 1;
-        if (POS == 0)
+      case toFloor1:
+        if (now - lastTimeCmd1 > DEBOUNCE_DELAY)
         {
-          POS = 1;
+          lastTimeCmd1 = now; 
+
+          cmd_buf = 1;
+          if (POS == 0) 
+          {
+            POS = 1;
+          }
+          Serial.println("received toFloor1 cmd");
+          strcpy(publish_status.cmd, "toFloor1");
+          if (moving_state == IDLE)
+            xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
         }
-        Serial.println("received toFloor1 cmd");
-        // publish_status.cmd = "toFloor1";
-        strcpy(publish_status.cmd, "toFloor1");
-        if (moving_state == IDLE)
-          xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
+        else
+        {
+          Serial.println("toFloor1 Ignored (Debounce 5s)");
+        }
         break;
+
       case toFloor2:
-        cmd_buf = 2;
-        Serial.println("received toFloor2 cmd");
-        strcpy(publish_status.cmd, "toFloor2");
-        // publish_status.cmd = "toFloor2";
-        if (moving_state == IDLE)
-          xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
+        if (now - lastTimeCmd2 > DEBOUNCE_DELAY)
+        {
+          lastTimeCmd2 = now; 
+
+          cmd_buf = 2;
+          Serial.println("received toFloor2 cmd");
+          strcpy(publish_status.cmd, "toFloor2");
+          if (moving_state == IDLE)
+            xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
+        }
+        else
+        {
+          Serial.println("toFloor2 Ignored (Debounce 5s)");
+        }
         break;
-      // case toFloor3:
-      //   cmd_buf = 3;
-      //   Serial.println("received toFloor3 cmd");
-      //   if(moving_state == IDLE) xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
-      //   break;
+
+      case POWER_CUT:
+        Serial.println("received POWER CUT! cmd");
+        strcpy(publish_status.cmd, "POWER_CUT!");
+        digitalWrite(R_POWER_CUT, LOW);
+        xTimerStart(xPowerCutTimer, 0);
+        break;
+
       case STOP:
         if (moving_state != IDLE)
         {
+          strcpy(publish_status.cmd, "STOP");
+          Serial.println("received STOP cmd");
           xTimerStop(xStopTransitTimer, 0);
+
+          if(POS != transit.floor)
+          {
+            lastTarget = transit.floor; 
+          }
+          lastDir = transit.dir;
+
           btwFloor = true;
           M_STP();
           BRK_ON();
           xQueueReset(xQueueGetDirection);
           TARGET = 0;
           moving_state = IDLE;
-          lastDir = transit.dir;
 
           publish_status.btwFloor = btwFloor;
           publish_status.targetFloor = 0;
           publish_status.state = IDLE;
           publish_status.isBrake = true;
-          break;
+
+          lastTimeCmd1 = 0;
+          lastTimeCmd2 = 0;
         }
+        break;
       }
+
       hasChanged = true;
     }
-    vTaskDelay(10);
+
+    vTaskDelay(pdMS_TO_TICKS(50));
   }
+}
+
+void vCutPower(TimerHandle_t xTimer)
+{
+  digitalWrite(R_POWER_CUT, HIGH);
 }
 
 void ARDUINO_ISR_ATTR ISR_LowerLim()
@@ -1347,6 +1751,8 @@ void ARDUINO_ISR_ATTR ISR_LowerLim()
 
   POS = MIN_FLOOR;
   btwFloor = false;
+  
+  digitalWrite(R_POWER_CUT, HIGH); 
 
   publish_status.pos = POS;
   publish_status.btwFloor = false;
@@ -1434,6 +1840,8 @@ void setup()
 
   // Start serial interface:
   Serial.begin(115200);
+  Serial1.begin(38400, SERIAL_8E1, PIN_RX, PIN_TX);
+  node.begin(Inverter_slaveID, Serial1);
   while (!Serial)
     ;
 
@@ -1450,13 +1858,10 @@ void setup()
 
   loadStatus();
   RF.enableReceive(RFReceiver); // attach interrupt to 22
-
   delay(1000);
 
   bool m_autoconnected_attempt_succeeded = false;
   m_autoconnected_attempt_succeeded = connectAttempt("", ""); // uses SSID/PWD stored in ESP32 secret memory.....
-  // Serial.print("m_autoconnected_attempt_succeeded = ");
-  // Serial.println(m_autoconnected_attempt_succeeded);
   if (!m_autoconnected_attempt_succeeded)
   {
     // try SSID/PWD from file...
@@ -1471,7 +1876,7 @@ void setup()
     runWifiPortal();
   }
 
-  MDNS.begin("keepintouch");
+  MDNS.begin("ximplex_ws");
 
   server.reset(); // try putting this in setup
   configureserver();
@@ -1494,7 +1899,7 @@ void setup()
 
   pinMode(R_UP, OUTPUT);
   pinMode(R_DW, OUTPUT);
-  pinMode(MOVING_DW, OUTPUT);
+  pinMode(R_POWER_CUT, OUTPUT);
   pinMode(floorSensor1, INPUT); // INPUT_PULLUP
   pinMode(floorSensor2, INPUT);
   // pinMode(floorSensor3, INPUT_PULLUP);
@@ -1503,23 +1908,25 @@ void setup()
   // attachInterrupt(floorSensor3, ISR_atFloor3, FALLING);
   pinMode(BRK, OUTPUT);
   pinMode(NP, INPUT_PULLUP);
-  attachInterrupt(NP, ISR_Landing, FALLING);
+  attachInterrupt(NP, ISR_Landing, RISING);
   pinMode(CS, OUTPUT);
   digitalWrite(CS, HIGH); // wake receiver up
   pinMode(RST_SYS, INPUT_PULLUP);
   attachInterrupt(RST_SYS, ISR_ResetSystem, FALLING);
 
+  digitalWrite(R_POWER_CUT, HIGH);
   // BRK_ON;
   M_STP;
-
+  
   xSemTransit = xSemaphoreCreateBinary();
   xSemDoneTransit = xSemaphoreCreateBinary();
   xSemLanding = xSemaphoreCreateBinary();
   xTransitMutex = xSemaphoreCreateMutex();
   xQueueGetDirection = xQueueCreate(1, sizeof(uint8_t));
   xWaitTimer = xTimerCreate("WaitTimer", WAIT_MS, pdFALSE, NULL, vWaitToTransit);
-  xStopTransitTimer = xTimerCreate("StopTransitTimer", FloorToFloor_MS, pdFALSE, NULL, vStopTransit);
-  xDisbrakeTimer = xTimerCreate("DisbrakeTimer", BRAKE_MS, pdFALSE, NULL, vDisbrake);
+  xStopTransitTimer = xTimerCreate("StopTransitTimer", 100, pdFALSE, NULL, vStopTransit);
+  xPowerCutTimer = xTimerCreate("PowerCutTimer", POWER_CUT_MS, pdFALSE, NULL, vCutPower);
+  // xDisbrakeTimer = xTimerCreate("DisbrakeTimer", BRAKE_MS, pdFALSE, NULL, vDisbrake);
 
   mqttMutex = xSemaphoreCreateMutex();
   hasChangedMutex = xSemaphoreCreateMutex();
@@ -1533,6 +1940,9 @@ void setup()
   // xTaskCreate(vStopper, "Stopper", 1024, NULL, 4, NULL);
   xTaskCreate(vLanding, "Landing", 2048, NULL, 4, &xLandingHandle);
   xTaskCreate(vStatusLogger, "StatusLogger", 4096, NULL, 2, NULL);
+  xTaskCreate(vPublishInverterTask, "PublishInverter", 4096, NULL, 3, NULL);
+  xTaskCreate(vPollingTask, "Polling", 4096, NULL, 3, NULL);
+  xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 3, NULL);
 
   Serial.print("Heap free memory (in bytes)= ");
   Serial.println(ESP.getFreeHeap());
@@ -1552,10 +1962,8 @@ void loop()
     RF.resetAvailable();
   }
 
-  m_websocketserver.loop();
-
   Serial.print("curr_pos in fs: ");
-  Serial.print(POS);  
+  Serial.print(POS);
 
   if (btwFloor == true)
   {
