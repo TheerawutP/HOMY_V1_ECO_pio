@@ -1,6 +1,6 @@
 #ifndef ELEVATOR_TYPES_H
 #define ELEVATOR_TYPES_H
-
+#include "elevatorTypes.h"
 #include <Arduino.h>
 
 enum direction_t

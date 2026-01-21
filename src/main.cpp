@@ -7,14 +7,16 @@
 #include <AsyncJson.h>
 #include "wifi_credentials.h"
 #include "WebSocketsServer.h"
-#include "elevatorStorage.h"
 #include "DNSServer.h"
 #include <PubSubClient.h>
 #include "RCSwitch.h"
 #include "FS.h"
 #include "SPIFFS.h"
 #include <ModbusMaster.h>
+#include <Preferences.h>
 #include "elevatorTypes.h"
+#include "elevatorStorage.h"
+
 // gpio
 #define PIN_RX 16 // 15
 #define PIN_TX 15 // 5
@@ -65,6 +67,7 @@ WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 ModbusMaster node;
 RCSwitch RF = RCSwitch();
+Preferences preferences;
 
 SemaphoreHandle_t mqttMutex; // Mutex to protect MQTT client
 SemaphoreHandle_t hasChangedMutex;
@@ -109,7 +112,7 @@ uint8_t MIN_FLOOR = 1;
 uint8_t lastTarget = 0;
 
 uint32_t ws_cmd_value = 0;
-uint32_t FloorToFloor_MS = 17000; // only for up dir
+uint32_t FloorToFloor_MS = 16500; // only for up dir
 
 int hreg[8][32];
 
@@ -137,6 +140,7 @@ status_t publish_status = {
     false,
     NORMAL,
     0};
+
 
 state_t moving_state = IDLE;
 read_state curr_slave = INV;
@@ -1152,33 +1156,6 @@ bool readSSIDPWDfile(String m_pwd_filename_to_read)
   return false;
 }
 
-// void vUpdatePage(void *pvParams)
-// {
-//   for (;;)
-//   {
-//     m_websocketserver.loop();
-
-//     temp_json_string = "{\"floorValue\":";
-//     temp_json_string += String(POS);
-//     temp_json_string += ",\"Up\":";
-//     temp_json_string += String(publish_status.dir == UP ? "true" : "false");
-//     temp_json_string += ",\"Down\":";
-//     temp_json_string += String(publish_status.dir == DOWN ? "true" : "false");
-//     temp_json_string += ",\"BtwFloor\":";
-//     temp_json_string += String(publish_status.btwFloor ? "true" : "false");
-//     temp_json_string += ",\"Moving\":";
-//     temp_json_string += String(publish_status.state == MOVING ? "true" : "false");
-//     temp_json_string += ",\"TargetFloor\":";
-//     temp_json_string += String(publish_status.targetFloor);
-//     temp_json_string += ",\"Mode\":";
-//     temp_json_string += String(publish_status.mode == NORMAL ? "\"NORMAL\"" : "\"EMERGENCY\"");
-//     temp_json_string += "}";
-
-//     m_websocketserver.broadcastTXT(temp_json_string.c_str(), temp_json_string.length());
-//     vTaskDelay(pdMS_TO_TICKS(50));
-//   }
-// }
-
 void vUpdatePage(void *pvParams)
 {
   static char jsonBuf[256];
@@ -1362,7 +1339,6 @@ void vTransit(void *arg)
       }
       // BRK_OFF();
       Serial.println("start transit");
-      ;
       moving_state = MOVING;
       ROTATE(transit.dir);
 
@@ -1398,11 +1374,11 @@ void vGetDirection(void *arg)
       {
         if (btwFloor == true)
         {
-          if (lastTarget > POS)
-            transit.dir = DOWN;
-          if (lastTarget < POS)
-            transit.dir = UP;
+          if (lastTarget > POS) transit.dir = DOWN;
+          if (lastTarget < POS) transit.dir = UP;
+
           transit.floor = target;
+
           xTimerStart(xWaitTimer, 0);
         }
         else
@@ -1469,7 +1445,6 @@ void vStopTransit(TimerHandle_t xTimer)
 {
   M_STP();
   // BRK_ON();
-  TARGET = 0;
   moving_state = IDLE;
   btwFloor = false;
   POS = publish_status.targetFloor; // update current position
@@ -1479,6 +1454,8 @@ void vStopTransit(TimerHandle_t xTimer)
   publish_status.btwFloor = btwFloor;
   // publish_status.isBrake = true;
   publish_status.state = moving_state;
+  TARGET = 0;
+
   hasChanged = true;
 }
 
@@ -1561,76 +1538,6 @@ void vReceive(void *arg)
         break;
 
       case STOP:
-        if (moving_state != IDLE)
-        {
-          strcpy(publish_status.cmd, "STOP");
-          Serial.println("received STOP cmd");
-          xTimerStop(xStopTransitTimer, 0);
-
-          if (POS != transit.floor)
-          {
-            lastTarget = transit.floor;
-          }
-          lastDir = transit.dir;
-
-          btwFloor = true;
-          M_STP();
-          BRK_ON();
-          xQueueReset(xQueueGetDirection);
-          TARGET = 0;
-          moving_state = IDLE;
-
-          publish_status.btwFloor = btwFloor;
-          publish_status.targetFloor = 0;
-          publish_status.state = IDLE;
-          publish_status.isBrake = true;
-
-          lastTimeCmd1 = 0;
-          lastTimeCmd2 = 0;
-        }
-        break;
-
-      case (GO_UP):
-        if (now - lastTimeCmd2 > DEBOUNCE_DELAY)
-        {
-          lastTimeCmd2 = now;
-
-          cmd_buf = 2;
-          Serial.println("received toFloor2 cmd");
-          strcpy(publish_status.cmd, "toFloor2");
-          if (moving_state == IDLE)
-            xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
-        }
-        else
-        {
-          Serial.println("toFloor2 Ignored (Debounce 5s)");
-        }
-
-        break;
-
-      case (GO_DW):
-        if (now - lastTimeCmd1 > DEBOUNCE_DELAY)
-        {
-          lastTimeCmd1 = now;
-
-          cmd_buf = 1;
-          if (POS == 0)
-          {
-            POS = 1;
-          }
-
-          Serial.println("received toFloor1 cmd");
-          strcpy(publish_status.cmd, "toFloor1");
-          if (moving_state == IDLE)
-            xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
-        }
-        else
-        {
-          Serial.println("toFloor1 Ignored (Debounce 5s)");
-        }
-        break;
-
-      case (GO_STOP):
         if (moving_state != IDLE)
         {
           strcpy(publish_status.cmd, "STOP");
