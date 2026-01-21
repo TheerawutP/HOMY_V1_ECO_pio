@@ -117,6 +117,7 @@ function onMessage(evt) {
         // Print out our received message
         console.log("Received: " + evt.data);
         var m_json_obj = JSON.parse(evt.data);
+        
         var btnUp = document.getElementById("btnUp");
         var btnDown = document.getElementById("btnDown");
         var btnEmg = document.getElementById("btnEmergency");

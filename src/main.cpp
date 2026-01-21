@@ -14,11 +14,11 @@
 #include "FS.h"
 #include "SPIFFS.h"
 #include <ModbusMaster.h>
-
+#include "elevatorTypes.h"
 // gpio
 #define PIN_RX 16 // 15
 #define PIN_TX 15 // 5
-#define WIFI_READY 22
+#define WIFI_READY 13
 
 #define RFReceiver 23
 #define floorSensor1 32
@@ -30,114 +30,61 @@
 #define NP 25
 #define CS 21
 #define RST_SYS 4
-
 #define MB_RX 26
 #define MB_TX 27
 
+// rf codes
 #define toFloor1 174744
 #define toFloor2 174740
 #define POWER_CUT 174738
 #define STOP 174737
+#define GO_UP 5259521
+#define GO_DW 5259528
+#define GO_STOP 5259524
+
+// ms timings
 #define DEBOUNCE_MS 200
 #define BRAKE_MS 2000
 #define WAIT_MS 300
 #define POWER_CUT_MS 3000
-uint8_t MAX_FLOOR = 2;
-#define MIN_FLOOR 1
-uint32_t FloorToFloor_MS = 18500; // only for up dir
 
 #define Inverter_slaveID 1
 #define H0_INV 28672
 #define INV_NUM 19
 
-enum direction_t
-{
-  UP,
-  DOWN,
-  STAY
-};
-
-enum state_t
-{
-  IDLE,
-  MOVING,
-};
-state_t moving_state = IDLE;
-
-enum elevatorMode_t
-{
-  NORMAL,
-  EMERGENCY
-};
-
-enum read_state
-{
-  PLC,
-  INV,
-};
-read_state curr_slave = INV;
-
 const char *mqtt_broker = "kit.flinkone.com";
 const int mqtt_port = 1883; // unencrypt
-
-// topics
 char *KIT_topic = "kit";
 char *UT_case = "/UT_500";
 char *system_status = "/sys_v2";
+char *elevator_status = "/ele_status";
+char *inverter_status = "/inv_status";
+char mqtt_topic[64];
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 ModbusMaster node;
+RCSwitch RF = RCSwitch();
 
 SemaphoreHandle_t mqttMutex; // Mutex to protect MQTT client
 SemaphoreHandle_t hasChangedMutex;
-QueueHandle_t xQueueTransit;
-QueueHandle_t xQueueGetDirection;
+SemaphoreHandle_t xTransitMutex;
 SemaphoreHandle_t xSemTransit = NULL;
 SemaphoreHandle_t xSemDoneTransit = NULL;
-SemaphoreHandle_t xSemLanding;
+SemaphoreHandle_t xSemLanding = NULL;
+
+QueueHandle_t xQueueTransit;
+QueueHandle_t xQueueGetDirection;
+
 TimerHandle_t xDisbrakeTimer;
 TimerHandle_t xWaitTimer;
 TimerHandle_t xStopTransitTimer;
 TimerHandle_t xPowerCutTimer;
+
 TaskHandle_t xLandingHandle;
 TaskHandle_t xPublishHandle;
-SemaphoreHandle_t xTransitMutex;
 
-typedef struct
-{
-  char cmd[16];
-  bool isBrake;
-  direction_t dir;
-  state_t state;
-  uint8_t pos;
-  bool btwFloor;
-  elevatorMode_t mode;
-  uint8_t targetFloor;
-} status_t;
-
-status_t publish_status = {
-    "NULL",
-    true,
-    STAY,
-    IDLE,
-    0,
-    false,
-    NORMAL,
-    0};
-
-typedef struct
-{
-  uint8_t floor;
-  direction_t dir;
-} TRANSIT;
-
-TRANSIT transit;
-RCSwitch RF = RCSwitch();
-
-bool hasChanged = true;
-
-AsyncWebServer server(80); //
+AsyncWebServer server(80);
 WebSocketsServer m_websocketserver = WebSocketsServer(81);
 int last_time_loop_called = millis();
 int last_time_sent_websocket_server = millis();
@@ -156,6 +103,16 @@ String temp_json_string = "";
 volatile uint8_t POS = -1;
 volatile uint8_t defaultPOS = 1;
 volatile uint8_t TARGET = 0;
+
+uint8_t MAX_FLOOR = 2;
+uint8_t MIN_FLOOR = 1;
+uint8_t lastTarget = 0;
+
+uint32_t ws_cmd_value = 0;
+uint32_t FloorToFloor_MS = 17000; // only for up dir
+
+int hreg[8][32];
+
 volatile unsigned long lastFloorISR_1 = 0;
 volatile unsigned long lastFloorISR_2 = 0;
 volatile unsigned long lastFloorISR_3 = 0;
@@ -163,14 +120,27 @@ volatile unsigned long lastLowerLim = 0;
 volatile unsigned long lastUpperLim = 0;
 volatile unsigned long lastNoPowerISR = 0;
 volatile unsigned long lastResetSysISR = 0;
+
 bool emergency = false;
 bool btwFloor = false;
-direction_t lastDir = UP;
-uint8_t lastTarget = 0;
-int hreg[8][32];
-// bool wait_execution = false;
 bool ws_cmd = false;
-uint32_t ws_cmd_value = 0;
+bool hasChanged = true;
+
+direction_t lastDir = STAY;
+
+status_t publish_status = {
+    "NULL",
+    true,
+    STAY,
+    IDLE,
+    0,
+    false,
+    NORMAL,
+    0};
+
+state_t moving_state = IDLE;
+read_state curr_slave = INV;
+TRANSIT transit;
 
 //******************* END VARIABLE DECLARATIONS**************************
 
@@ -200,12 +170,6 @@ inline void BRK_OFF()
   Serial.println("Brake OFF");
 }
 
-// inline void M_RUN() {
-//     digitalWrite(EN, HIGH);
-
-//     Serial.println("Motor Run");
-// }
-
 inline void M_STP()
 {
   digitalWrite(R_UP, LOW);
@@ -223,11 +187,6 @@ inline void M_DW()
 {
   digitalWrite(R_DW, HIGH);
   Serial.println("Move Down");
-}
-
-inline int BrkState()
-{
-  return digitalRead(BRK);
 }
 
 String statusToJson_ELE(const status_t status)
@@ -790,22 +749,6 @@ void handle_websocket_text(uint8_t *payload)
       int m_new_floor_number = m_JSONdoc_from_payload["change_floor_number_to"];
       Serial.println(m_new_floor_number);
       MAX_FLOOR = m_new_floor_number;
-
-      // if (Sweep_Mode == CTLPANEL)
-      // {
-      //   // set cell voltage, send params back to browswer such as percentage and dac settings
-      //   Serial.println("Calling setLMPBias and setVoltage to:");
-      //   Serial.println(cell_voltage_control_panel);
-      //   setLMPBias(cell_voltage_control_panel);
-      //   setVoltage(cell_voltage_control_panel);
-      //   // send percent setting, dacvout back to browswer xyzxyz
-      //   temp_json_string = "{\"dacVout\":";
-      //   temp_json_string += String(dacVout, DEC);
-      //   temp_json_string += ",\"percentage\":";
-      //   temp_json_string += String(TIA_BIAS[bias_setting]);
-      //   temp_json_string += "}";
-      //   m_websocketserver.broadcastTXT(temp_json_string.c_str(), temp_json_string.length());
-      // }
     }
 
     if (m_key_string == "change_up_duration_to")
@@ -815,45 +758,6 @@ void handle_websocket_text(uint8_t *payload)
       Serial.println(m_new_up_duration);
       FloorToFloor_MS = m_new_up_duration;
     }
-
-    // if (m_key_string == "change_down_duration_to")
-    // {
-    //   Serial.println("change_down_duration_to called");
-    //   int m_new_down_duration = m_JSONdoc_from_payload["change_down_duration_to"];
-    //   Serial.println(m_new_down_duration);
-    //   FloorToFloor_MS = m_new_down_duration;
-    // }
-
-    // if (m_key_string == "change_lmpGain_to")
-    // {
-    //   Serial.println("change_lmpGain_to called");
-    //   int m_new_lmpGain = m_JSONdoc_from_payload["change_lmpGain_to"];
-    //   LMPgainGLOBAL = m_new_lmpGain;
-    //   if (Sweep_Mode == CTLPANEL)
-    //   {
-    //     Serial.println(LMPgainGLOBAL);
-    //     pStat.setGain(LMPgainGLOBAL);
-    //   }
-    // }
-
-    // change_control_panel_is_active_to
-    // if (m_key_string == "change_control_panel_is_active_to")
-    // {
-    //   Serial.println("change_control_panel_is_active_to called");
-    //   bool m_new_control_panel_active_state = m_JSONdoc_from_payload["change_control_panel_is_active_to"];
-    //   Serial.println(m_new_control_panel_active_state);
-    //   if (m_new_control_panel_active_state)
-    //   {
-    //     Sweep_Mode = CTLPANEL;
-    //     send_is_sweeping_status_over_websocket(true);
-    //   }
-    //   if (!m_new_control_panel_active_state)
-    //   {
-    //     Sweep_Mode = dormant;
-    //     send_is_sweeping_status_over_websocket(false);
-    //   }
-    //   // set control panel to active or inactive, depending on message
-    // }
   }
 }
 
@@ -921,6 +825,7 @@ void configureserver()
                                                       if (jsonObj1["on"])
                                                       {
                                                         Serial.println("Up button pressed.");
+                                                        Serial.println("------------------");
                                                         ws_cmd = true;
                                                         ws_cmd_value = toFloor2;
                                                       }
@@ -933,6 +838,7 @@ void configureserver()
                                                       if (jsonObj2["on"])
                                                       {
                                                         Serial.println("Down button pressed.");
+                                                        Serial.println("------------------");
                                                         ws_cmd = true;
                                                         ws_cmd_value = toFloor1;
                                                       }
@@ -956,6 +862,7 @@ void configureserver()
                                                       if (jsonObj3["on"])
                                                       {
                                                         Serial.println("stop button pressed. Stopping all movement!");
+                                                        Serial.println("------------------");
                                                         ws_cmd = true;
                                                         ws_cmd_value = STOP;
                                                       }
@@ -968,6 +875,7 @@ void configureserver()
                                                       if (jsonObj4["on"])
                                                       {
                                                         Serial.println("Emergency button pressed. Stopping all movement immediately!");
+                                                        Serial.println("------------------");
                                                         ws_cmd = true;
                                                         ws_cmd_value = POWER_CUT;
                                                       }
@@ -1144,6 +1052,21 @@ void publishMqtt(const char *topic, const char *msg)
   }
 }
 
+void doneTransit(uint8_t floor, bool btw, state_t state)
+{
+  POS = floor;
+  btwFloor = btw;
+  moving_state = state;
+  TARGET = 0;
+
+  publish_status.state = moving_state;
+  publish_status.pos = POS;
+  publish_status.btwFloor = false;
+  publish_status.targetFloor = TARGET;
+  hasChanged = true;
+  M_STP();
+}
+
 void vStatusLogger(void *arg)
 {
   int lastPOS = -1;
@@ -1229,30 +1152,78 @@ bool readSSIDPWDfile(String m_pwd_filename_to_read)
   return false;
 }
 
+// void vUpdatePage(void *pvParams)
+// {
+//   for (;;)
+//   {
+//     m_websocketserver.loop();
+
+//     temp_json_string = "{\"floorValue\":";
+//     temp_json_string += String(POS);
+//     temp_json_string += ",\"Up\":";
+//     temp_json_string += String(publish_status.dir == UP ? "true" : "false");
+//     temp_json_string += ",\"Down\":";
+//     temp_json_string += String(publish_status.dir == DOWN ? "true" : "false");
+//     temp_json_string += ",\"BtwFloor\":";
+//     temp_json_string += String(publish_status.btwFloor ? "true" : "false");
+//     temp_json_string += ",\"Moving\":";
+//     temp_json_string += String(publish_status.state == MOVING ? "true" : "false");
+//     temp_json_string += ",\"TargetFloor\":";
+//     temp_json_string += String(publish_status.targetFloor);
+//     temp_json_string += ",\"Mode\":";
+//     temp_json_string += String(publish_status.mode == NORMAL ? "\"NORMAL\"" : "\"EMERGENCY\"");
+//     temp_json_string += "}";
+
+//     m_websocketserver.broadcastTXT(temp_json_string.c_str(), temp_json_string.length());
+//     vTaskDelay(pdMS_TO_TICKS(50));
+//   }
+// }
+
 void vUpdatePage(void *pvParams)
 {
+  static char jsonBuf[256];
+
   for (;;)
   {
     m_websocketserver.loop();
 
-    temp_json_string = "{\"floorValue\":";
-    temp_json_string += String(POS);
-    temp_json_string += ",\"Up\":";
-    temp_json_string += String(publish_status.dir == UP ? "true" : "false");
-    temp_json_string += ",\"Down\":";
-    temp_json_string += String(publish_status.dir == DOWN ? "true" : "false");
-    temp_json_string += ",\"BtwFloor\":";
-    temp_json_string += String(publish_status.btwFloor ? "true" : "false");
-    temp_json_string += ",\"Moving\":";
-    temp_json_string += String(publish_status.state == MOVING ? "true" : "false");
-    temp_json_string += ",\"TargetFloor\":";
-    temp_json_string += String(publish_status.targetFloor);
-    temp_json_string += ",\"Mode\":";
-    temp_json_string += String(publish_status.mode == NORMAL ? "\"NORMAL\"" : "\"EMERGENCY\"");
-    temp_json_string += "}";
+    uint8_t pos;
+    status_t statusCopy;
 
-    m_websocketserver.broadcastTXT(temp_json_string.c_str(), temp_json_string.length());
-    vTaskDelay(pdMS_TO_TICKS(50));
+    pos = POS;
+
+    if (xSemaphoreTake(hasChangedMutex, pdMS_TO_TICKS(5)) == pdTRUE)
+    {
+      statusCopy = publish_status;
+      xSemaphoreGive(hasChangedMutex);
+    }
+    else
+    {
+      vTaskDelay(pdMS_TO_TICKS(100));
+      continue;
+    }
+
+    snprintf(
+        jsonBuf,
+        sizeof(jsonBuf),
+        "{\"floorValue\":%d,"
+        "\"Up\":%s,"
+        "\"Down\":%s,"
+        "\"BtwFloor\":%s,"
+        "\"Moving\":%s,"
+        "\"TargetFloor\":%d,"
+        "\"Mode\":\"%s\"}",
+        pos,
+        (statusCopy.dir == UP) ? "true" : "false",
+        (statusCopy.dir == DOWN) ? "true" : "false",
+        statusCopy.btwFloor ? "true" : "false",
+        (statusCopy.state == MOVING) ? "true" : "false",
+        statusCopy.targetFloor,
+        (statusCopy.mode == NORMAL) ? "NORMAL" : "EMERGENCY");
+
+    m_websocketserver.broadcastTXT(jsonBuf, strlen(jsonBuf));
+
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
@@ -1306,7 +1277,17 @@ void vPublishTask(void *pvParams)
       {
 
         String status_payload = statusToJson_ELE(publish_status);
-        publishMqtt("kit/UT_500/sys_v2/ele_status", status_payload.c_str());
+
+        snprintf(
+            mqtt_topic,
+            sizeof(mqtt_topic),
+            "%s%s%s%s",
+            KIT_topic,
+            UT_case,
+            system_status,
+            elevator_status);
+
+        publishMqtt(mqtt_topic, status_payload.c_str());
         hasChanged = false;
       }
       xSemaphoreGive(hasChangedMutex);
@@ -1322,9 +1303,19 @@ void vPublishInverterTask(void *pvParams)
     if ((hreg[Inverter_slaveID][7] != 992) && (hreg[Inverter_slaveID][7] != 0))
     {
       String inverter_payload = statusToJson_INV(hreg[Inverter_slaveID]);
-      publishMqtt("kit/UT_500/sys_v2/inveter_status", inverter_payload.c_str());
+
+      snprintf(
+          mqtt_topic,
+          sizeof(mqtt_topic),
+          "%s%s%s%s",
+          KIT_topic,
+          UT_case,
+          system_status,
+          inverter_status);
+
+      publishMqtt(mqtt_topic, inverter_payload.c_str());
     }
-    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
@@ -1333,7 +1324,6 @@ void vPollingTask(void *pvParams)
   for (;;)
   {
     uint32_t result;
-    // if (xSemaphoreTake(hregMutex, portMAX_DELAY) == pdTRUE) {
     digitalWrite(WIFI_READY, HIGH);
     switch (curr_slave)
     {
@@ -1355,10 +1345,7 @@ void vPollingTask(void *pvParams)
       // curr_slave = PLC;
       break;
     }
-
-    //   xSemaphoreGive(hregMutex);
-    // }
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(500));
   }
 }
 
@@ -1392,6 +1379,7 @@ void vGetDirection(void *arg)
 {
   uint8_t target;
   direction_t dir;
+
   for (;;)
   {
     if (xQueueReceive(xQueueGetDirection, &target, portMAX_DELAY) == pdTRUE)
@@ -1410,13 +1398,10 @@ void vGetDirection(void *arg)
       {
         if (btwFloor == true)
         {
-          // if (lastDir == UP)
-          //   transit.dir = DOWN;
-          // if (lastDir == DOWN)
-          //   transit.dir = UP;
-          // transit.floor = target;
-          if(lastTarget > POS) transit.dir = DOWN;
-          if(lastTarget < POS) transit.dir = UP;
+          if (lastTarget > POS)
+            transit.dir = DOWN;
+          if (lastTarget < POS)
+            transit.dir = UP;
           transit.floor = target;
           xTimerStart(xWaitTimer, 0);
         }
@@ -1435,55 +1420,29 @@ void vGetDirection(void *arg)
   }
 }
 
-// void vLanding(void *arg)
-// {
-//   for (;;)
-//   {
-//     if (xSemaphoreTake(xSemLanding, portMAX_DELAY) == pdTRUE)
-//     {
-
-//       if (POS == 1 && emergency == 1)
-//       {
-//         Serial.println("finish Safety landing");
-//         // M_STP();
-//         BRK_OFF();
-//         emergency = false;
-//         publish_status.mode = NORMAL;
-//         publish_status.isBrake = false;
-//         hasChanged = true;
-//         xTimerStop(xDisbrakeTimer, 0);
-//         vTaskSuspend(NULL);
-//       }
-
-//       BRK_ON();
-//       publish_status.targetFloor = 1;
-//       publish_status.isBrake = true;
-//       hasChanged = true;
-//       xTimerStart(xDisbrakeTimer, 0);
-//     }
-//   }
-// }
-
 void vLanding(void *arg)
 {
   for (;;)
   {
     if (xSemaphoreTake(xSemLanding, portMAX_DELAY) == pdTRUE)
     {
-      if (POS == MIN_FLOOR)
+      if (POS == MIN_FLOOR && btwFloor == false)
       {
-        Serial.println("finish Safety landing");
-        BRK_OFF();
-        emergency = false;
-        publish_status.mode = NORMAL;
-        publish_status.isBrake = false;
-        hasChanged = true;
+        // Serial.println("finish Safety landing");
+        // BRK_OFF();
+        // emergency = false;
+        // publish_status.mode = NORMAL;
+        // publish_status.isBrake = false;
+        // hasChanged = true;
         vTaskSuspend(NULL);
         continue;
       }
 
       BRK_ON();
-      publish_status.targetFloor = 1;
+      TARGET = MIN_FLOOR;
+      moving_state = MOVING;
+      publish_status.state = moving_state;
+      publish_status.targetFloor = TARGET;
       publish_status.isBrake = true;
       hasChanged = true;
 
@@ -1499,15 +1458,6 @@ void vLanding(void *arg)
     }
   }
 }
-
-// void vDisbrake(TimerHandle_t xTimer)
-// {
-//   BRK_OFF();
-//   delay(500);
-//   publish_status.isBrake = false;
-//   hasChanged = true;
-//   xSemaphoreGive(xSemLanding);
-// }
 
 void vWaitToTransit(TimerHandle_t xTimer)
 {
@@ -1532,106 +1482,19 @@ void vStopTransit(TimerHandle_t xTimer)
   hasChanged = true;
 }
 
-// void vReceive(void *arg)
-// {
-//   int cmd_buf;
-//   for (;;)
-//   {
-//     int cmd = 0;
-//     bool commandReceived = false;
-
-//     if (RF.available())
-//     {
-//       cmd = RF.getReceivedValue();
-//       RF.resetAvailable();
-//       commandReceived = true;
-//     }
-
-//     if (ws_cmd == true)
-//     {
-//       ws_cmd = false;
-//       cmd = ws_cmd_value;
-//       commandReceived = true;
-//     }
-
-//     if (commandReceived && (emergency == false))
-//     {
-//       switch (cmd)
-//       {
-//       case toFloor1:
-//         cmd_buf = 1;
-//         if (POS == 0)
-//         {
-//           POS = 1;
-//         }
-//         Serial.println("received toFloor1 cmd");
-//         strcpy(publish_status.cmd, "toFloor1");
-//         if (moving_state == IDLE)
-//           xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
-//         break;
-
-//       case toFloor2:
-//         cmd_buf = 2;
-//         Serial.println("received toFloor2 cmd");
-//         strcpy(publish_status.cmd, "toFloor2");
-//         if (moving_state == IDLE)
-//           xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
-//         break;
-
-//       case POWER_CUT:
-//         Serial.println("received POWER CUT! cmd");
-//         strcpy(publish_status.cmd, "POWER_CUT!");
-//         // emergency = true;
-//         // publish_status.mode = EMERGENCY;
-//         // publish_status.targetFloor = MIN_FLOOR;
-//         // publish_status.state = MOVING;
-//         // hasChanged = true;
-//         digitalWrite(R_POWER_CUT, HIGH);
-//         break;
-
-//       case STOP:
-//         if (moving_state != IDLE)
-//         {
-//           strcpy(publish_status.cmd, "STOP");
-//           Serial.println("received STOP cmd");
-//           xTimerStop(xStopTransitTimer, 0);
-
-//           // POS = (POS+TARGET)/2; // update current position to be between current and target
-//           btwFloor = true;
-//           M_STP();
-//           BRK_ON();
-//           xQueueReset(xQueueGetDirection);
-//           TARGET = 0;
-//           moving_state = IDLE;
-//           lastDir = transit.dir;
-
-//           publish_status.btwFloor = btwFloor;
-//           publish_status.targetFloor = 0;
-//           publish_status.state = IDLE;
-//           publish_status.isBrake = true;
-//         }
-//         break;
-//       }
-
-//       hasChanged = true;
-//     }
-
-//     vTaskDelay(pdMS_TO_TICKS(50));
-//   }
-// }
 void vReceive(void *arg)
 {
   int cmd_buf;
 
   static unsigned long lastTimeCmd1 = 0;
   static unsigned long lastTimeCmd2 = 0;
-  const unsigned long DEBOUNCE_DELAY = 5000; 
+  const unsigned long DEBOUNCE_DELAY = 5000;
 
   for (;;)
   {
     int cmd = 0;
     bool commandReceived = false;
-    unsigned long now = millis(); 
+    unsigned long now = millis();
 
     if (RF.available())
     {
@@ -1654,13 +1517,14 @@ void vReceive(void *arg)
       case toFloor1:
         if (now - lastTimeCmd1 > DEBOUNCE_DELAY)
         {
-          lastTimeCmd1 = now; 
+          lastTimeCmd1 = now;
 
           cmd_buf = 1;
-          if (POS == 0) 
+          if (POS == 0)
           {
             POS = 1;
           }
+
           Serial.println("received toFloor1 cmd");
           strcpy(publish_status.cmd, "toFloor1");
           if (moving_state == IDLE)
@@ -1675,7 +1539,7 @@ void vReceive(void *arg)
       case toFloor2:
         if (now - lastTimeCmd2 > DEBOUNCE_DELAY)
         {
-          lastTimeCmd2 = now; 
+          lastTimeCmd2 = now;
 
           cmd_buf = 2;
           Serial.println("received toFloor2 cmd");
@@ -1703,9 +1567,79 @@ void vReceive(void *arg)
           Serial.println("received STOP cmd");
           xTimerStop(xStopTransitTimer, 0);
 
-          if(POS != transit.floor)
+          if (POS != transit.floor)
           {
-            lastTarget = transit.floor; 
+            lastTarget = transit.floor;
+          }
+          lastDir = transit.dir;
+
+          btwFloor = true;
+          M_STP();
+          BRK_ON();
+          xQueueReset(xQueueGetDirection);
+          TARGET = 0;
+          moving_state = IDLE;
+
+          publish_status.btwFloor = btwFloor;
+          publish_status.targetFloor = 0;
+          publish_status.state = IDLE;
+          publish_status.isBrake = true;
+
+          lastTimeCmd1 = 0;
+          lastTimeCmd2 = 0;
+        }
+        break;
+
+      case (GO_UP):
+        if (now - lastTimeCmd2 > DEBOUNCE_DELAY)
+        {
+          lastTimeCmd2 = now;
+
+          cmd_buf = 2;
+          Serial.println("received toFloor2 cmd");
+          strcpy(publish_status.cmd, "toFloor2");
+          if (moving_state == IDLE)
+            xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
+        }
+        else
+        {
+          Serial.println("toFloor2 Ignored (Debounce 5s)");
+        }
+
+        break;
+
+      case (GO_DW):
+        if (now - lastTimeCmd1 > DEBOUNCE_DELAY)
+        {
+          lastTimeCmd1 = now;
+
+          cmd_buf = 1;
+          if (POS == 0)
+          {
+            POS = 1;
+          }
+
+          Serial.println("received toFloor1 cmd");
+          strcpy(publish_status.cmd, "toFloor1");
+          if (moving_state == IDLE)
+            xQueueSend(xQueueGetDirection, &cmd_buf, (TickType_t)0);
+        }
+        else
+        {
+          Serial.println("toFloor1 Ignored (Debounce 5s)");
+        }
+        break;
+
+      case (GO_STOP):
+        if (moving_state != IDLE)
+        {
+          strcpy(publish_status.cmd, "STOP");
+          Serial.println("received STOP cmd");
+          xTimerStop(xStopTransitTimer, 0);
+
+          if (POS != transit.floor)
+          {
+            lastTarget = transit.floor;
           }
           lastDir = transit.dir;
 
@@ -1745,23 +1679,18 @@ void ARDUINO_ISR_ATTR ISR_LowerLim()
   if (now - lastLowerLim < DEBOUNCE_MS)
     return; // debounce 50ms
   lastLowerLim = now;
-  // Serial.println("reach lowest");
 
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-  POS = MIN_FLOOR;
-  btwFloor = false;
-  
-  digitalWrite(R_POWER_CUT, HIGH); 
+  doneTransit(MIN_FLOOR, false, IDLE);
 
-  publish_status.pos = POS;
-  publish_status.btwFloor = false;
-  hasChanged = true;
-
-  if (TARGET == POS && emergency == false)
+  if (emergency == true)
   {
-    Serial.println("finish command toLowest");
-    xSemaphoreGiveFromISR(xSemDoneTransit, &xHigherPriorityTaskWoken);
+    Serial.println("finish command toLanding");
+    emergency = false;
+    BRK_OFF();
+    digitalWrite(R_POWER_CUT, HIGH);
+    publish_status.mode = NORMAL;
   }
 
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
@@ -1773,20 +1702,10 @@ void ARDUINO_ISR_ATTR ISR_UpperLim()
   if (now - lastUpperLim < DEBOUNCE_MS)
     return;
   lastUpperLim = now;
-  // Serial.println("reach highest");
+
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-  POS = MAX_FLOOR;
-  btwFloor = false;
-
-  publish_status.pos = POS;
-  publish_status.btwFloor = false;
-  hasChanged = true;
-  if (TARGET == POS && emergency == false)
-  {
-    Serial.println("finish command toHighest");
-    xSemaphoreGiveFromISR(xSemDoneTransit, &xHigherPriorityTaskWoken);
-  }
+  doneTransit(MAX_FLOOR, false, IDLE);
 
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
@@ -1797,19 +1716,18 @@ void ARDUINO_ISR_ATTR ISR_Landing()
   if (now - lastNoPowerISR < DEBOUNCE_MS)
     return;
   lastNoPowerISR = now;
-  // Serial.println("NO POWER is detected!");
+
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
   emergency = true;
   publish_status.mode = EMERGENCY;
   hasChanged = true;
 
-  if (POS != MIN_FLOOR)
+  if ((POS != MIN_FLOOR) || (btwFloor == true))
   {
     xTaskResumeFromISR(xLandingHandle);
     xSemaphoreGiveFromISR(xSemLanding, &xHigherPriorityTaskWoken);
   }
-
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
@@ -1837,8 +1755,6 @@ void ARDUINO_ISR_ATTR ISR_ResetSystem()
 
 void setup()
 {
-
-  // Start serial interface:
   Serial.begin(115200);
   Serial1.begin(38400, SERIAL_8E1, PIN_RX, PIN_TX);
   node.begin(Inverter_slaveID, Serial1);
@@ -1846,7 +1762,6 @@ void setup()
     ;
 
   Serial.println("Welcome to Ximplex_KIT");
-
   delay(500);
 
   // ############################### SPIFFS STARTUP #######################################
@@ -1857,8 +1772,10 @@ void setup()
   }
 
   loadStatus();
-  RF.enableReceive(RFReceiver); // attach interrupt to 22
-  delay(1000);
+  delay(500);
+
+  RF.enableReceive(RFReceiver);
+  delay(500);
 
   bool m_autoconnected_attempt_succeeded = false;
   m_autoconnected_attempt_succeeded = connectAttempt("", ""); // uses SSID/PWD stored in ESP32 secret memory.....
@@ -1871,7 +1788,6 @@ void setup()
   }
   if (!m_autoconnected_attempt_succeeded)
   {
-
     setUpAPService();
     runWifiPortal();
   }
@@ -1884,83 +1800,80 @@ void setup()
   m_websocketserver.begin();
   m_websocketserver.onEvent(onWebSocketEvent); // Start WebSocket server and assign callback
 
-  delay(1000);
+  delay(500);
 
   // wifiClient.setInsecure();
   Serial.println(WiFi.localIP());
   setupMQTT();
 
-  // for (int i = 0; i < subTopicNum; i++) {
-  //   sub_buff[i].topic = "";
-  //   sub_buff[i].payload = "";
-  // }
-
   pinMode(WIFI_READY, OUTPUT);
-
   pinMode(R_UP, OUTPUT);
   pinMode(R_DW, OUTPUT);
   pinMode(R_POWER_CUT, OUTPUT);
-  pinMode(floorSensor1, INPUT); // INPUT_PULLUP
-  pinMode(floorSensor2, INPUT);
-  // pinMode(floorSensor3, INPUT_PULLUP);
-  attachInterrupt(floorSensor1, ISR_LowerLim, FALLING);
-  attachInterrupt(floorSensor2, ISR_UpperLim, FALLING);
-  // attachInterrupt(floorSensor3, ISR_atFloor3, FALLING);
   pinMode(BRK, OUTPUT);
-  pinMode(NP, INPUT_PULLUP);
-  attachInterrupt(NP, ISR_Landing, RISING);
+
+  pinMode(floorSensor1, INPUT); // normal pull-up by using external resistor
+  pinMode(floorSensor2, INPUT); // normal pull-up by using external resistor
+  attachInterrupt(floorSensor1, ISR_LowerLim, FALLING);
+  // attachInterrupt(floorSensor2, ISR_UpperLim, FALLING);
+
+  pinMode(NP, INPUT); // normal pull-up by using external resistor
+  // attachInterrupt(NP, ISR_Landing, FALLING);
+
   pinMode(CS, OUTPUT);
-  digitalWrite(CS, HIGH); // wake receiver up
+  digitalWrite(CS, HIGH); // rf always waked up
+
   pinMode(RST_SYS, INPUT_PULLUP);
-  attachInterrupt(RST_SYS, ISR_ResetSystem, FALLING);
+  // attachInterrupt(RST_SYS, ISR_ResetSystem, FALLING);
 
   digitalWrite(R_POWER_CUT, HIGH);
-  // BRK_ON;
   M_STP;
-  
+
   xSemTransit = xSemaphoreCreateBinary();
   xSemDoneTransit = xSemaphoreCreateBinary();
   xSemLanding = xSemaphoreCreateBinary();
+
   xTransitMutex = xSemaphoreCreateMutex();
+  mqttMutex = xSemaphoreCreateMutex();
+  hasChangedMutex = xSemaphoreCreateMutex();
+
   xQueueGetDirection = xQueueCreate(1, sizeof(uint8_t));
+
   xWaitTimer = xTimerCreate("WaitTimer", WAIT_MS, pdFALSE, NULL, vWaitToTransit);
   xStopTransitTimer = xTimerCreate("StopTransitTimer", 100, pdFALSE, NULL, vStopTransit);
   xPowerCutTimer = xTimerCreate("PowerCutTimer", POWER_CUT_MS, pdFALSE, NULL, vCutPower);
   // xDisbrakeTimer = xTimerCreate("DisbrakeTimer", BRAKE_MS, pdFALSE, NULL, vDisbrake);
 
-  mqttMutex = xSemaphoreCreateMutex();
-  hasChangedMutex = xSemaphoreCreateMutex();
-  // pubQueue = xQueueCreate(20, sizeof(msg));
   xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 3, NULL);
   xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, &xPublishHandle);
-
   xTaskCreate(vReceive, "Receive", 1024, NULL, 2, NULL);
   xTaskCreate(vGetDirection, "GetDirection", 1024, NULL, 3, NULL);
   xTaskCreate(vTransit, "Transit", 1024, NULL, 3, NULL);
-  // xTaskCreate(vStopper, "Stopper", 1024, NULL, 4, NULL);
   xTaskCreate(vLanding, "Landing", 2048, NULL, 4, &xLandingHandle);
   xTaskCreate(vStatusLogger, "StatusLogger", 4096, NULL, 2, NULL);
   xTaskCreate(vPublishInverterTask, "PublishInverter", 4096, NULL, 3, NULL);
   xTaskCreate(vPollingTask, "Polling", 4096, NULL, 3, NULL);
   xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 3, NULL);
+  // xTaskCreate(vStopper, "Stopper", 1024, NULL, 4, NULL);
+  delay(500);
 
   Serial.print("Heap free memory (in bytes)= ");
   Serial.println(ESP.getFreeHeap());
   Serial.println(F("Setup complete."));
-  delay(1000);
+  delay(500);
 }
 
 void loop()
 {
-  if (RF.available())
-  {
-    Serial.println(RF.getReceivedValue());
-    Serial.println(RF.getReceivedBitlength());
-    Serial.println(RF.getReceivedDelay());
-    Serial.println(RF.getReceivedProtocol());
 
-    RF.resetAvailable();
-  }
+  // if (RF.available())
+  // {
+  //   Serial.println(RF.getReceivedValue());
+  //   Serial.println(RF.getReceivedBitlength());
+  //   Serial.println(RF.getReceivedDelay());
+  //   Serial.println(RF.getReceivedProtocol());
+  //   RF.resetAvailable();
+  // }
 
   Serial.print("curr_pos in fs: ");
   Serial.print(POS);
@@ -1976,5 +1889,4 @@ void loop()
 
   Serial.println("----------");
   vTaskDelay(5000);
-  // last_time_loop_called = millis();
 }
