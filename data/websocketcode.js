@@ -110,51 +110,66 @@ function addData(label, data) {
 function onMessage(evt) {
     console.log("onMessage called");
 
-
-    if (typeof (evt.data) == "string") { // payload is string (JSON probably)
+    if (typeof (evt.data) == "string") {
         console.log("STRING! parsing....");
-
-        // Print out our received message
         console.log("Received: " + evt.data);
-        var m_json_obj = JSON.parse(evt.data);
-        
-        var btnUp = document.getElementById("btnUp");
-        var btnDown = document.getElementById("btnDown");
-        var btnEmg = document.getElementById("btnEmergency");
 
-        //    console.log(m_json_obj);
+        try {
+            var m_json_obj = JSON.parse(evt.data);
 
-        if ('floorValue' in m_json_obj) {
-            document.getElementById("FloorValue").innerHTML = m_json_obj.floorValue;
-        }
+            var btnUp = document.getElementById("btnUp");
+            var btnDown = document.getElementById("btnDown");
+            var btnEmg = document.getElementById("btnEmergency");
 
-        if (m_json_obj.Moving) {
-            if (m_json_obj.Up === true) {
-                btnUp.classList.add("active");
-            } else {
-                btnUp.classList.remove("active");
+            if ('floorValue' in m_json_obj) {
+                var floorNumDisplay = document.querySelector("#FloorValue .floor-num");
+                if (floorNumDisplay) {
+                    floorNumDisplay.innerText = m_json_obj.floorValue;
+                }
             }
 
-            if (m_json_obj.Down === true) {
-                btnDown.classList.add("active");
-            } else {
-                btnDown.classList.remove("active");
-            }
-        } else {
-            btnUp.classList.remove("active");
-            btnDown.classList.remove("active");
-        }
+            if (m_json_obj.Moving) {
+                if (m_json_obj.Up === true) {
+                    btnUp?.classList.add("active");
+                } else {
+                    btnUp?.classList.remove("active");
+                }
 
-        if ('Mode' in m_json_obj) {
-            if (m_json_obj.Mode === "EMERGENCY") {
-                btnEmg.classList.add("blink"); 
+                if (m_json_obj.Down === true) {
+                    btnDown?.classList.add("active");
+                } else {
+                    btnDown?.classList.remove("active");
+                }
             } else {
-                btnEmg.classList.remove("blink"); 
+                btnUp?.classList.remove("active");
+                btnDown?.classList.remove("active");
             }
-        }
 
+            // จัดการโหมด Emergency
+            if ('Mode' in m_json_obj) {
+                if (m_json_obj.Mode === "EMERGENCY") {
+                    btnEmg?.classList.add("blink");
+                } else {
+                    btnEmg?.classList.remove("blink");
+                }
+            }
+
+            if ('BtwFloor' in m_json_obj) {
+                var floorMsg = document.querySelector("#FloorValue .floor-msg");
+                
+                if (floorMsg) {
+                    if (m_json_obj.BtwFloor === true) {
+                        floorMsg.classList.add("show"); 
+                    } else {
+                        floorMsg.classList.remove("show"); 
+                    }
+                }
+            }
+
+        } catch (e) {
+            console.error("Error parsing JSON: ", e);
+        }
     }
-
 }
 
 function addData(label, data) {

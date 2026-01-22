@@ -51,28 +51,52 @@ input[type=number] {
   gap: 15px;
 }
 
+
+
+
+
 .seven-seg {
   width: 200px; 
   height: 200px;
   border: 4px solid rgb(168, 219, 239);
   background: #222;
-  color: rgb(50, 198, 231); 
-  
-  font-family: 'Orbitron', monospace; 
-  font-size: 100px;
-  font-weight: bold;
-  letter-spacing: 6px;
-
+  color: rgb(50, 198, 231);
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 15px;
-
-  box-shadow:
-    inset 0 0 12px rgb(28, 105, 205),
-    inset 0 0 4px rgba(0, 0, 0, 0.2),
-    0 0 6px rgb(28, 105, 205);
+  
+  flex-direction: column; 
 }
+
+.seven-seg .floor-num {
+  font-size: 120px;    
+  line-height: 1;      
+  flex-grow: 1;       
+  display: flex;
+  align-items: center;
+}
+
+.seven-seg .floor-msg {
+  font-family: 'Orbitron', monospace; 
+  font-size: 14px;      
+  font-weight: bold;
+  color: rgb(50, 198, 231);
+  margin-bottom: 20px;  
+  text-transform: uppercase;
+  
+  display: none;        
+}
+
+.seven-seg .floor-msg.show {
+  display: block;
+  animation: blink 1s infinite; 
+}
+
+@keyframes blink { 50% { opacity: 0; } }
+
+
+
 
 .arrow-btn {
   width: 90px;

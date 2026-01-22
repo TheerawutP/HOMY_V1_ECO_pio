@@ -45,7 +45,7 @@
 #define GO_STOP 5259524
 
 // ms timings
-#define DEBOUNCE_MS 200
+#define DEBOUNCE_MS 1000
 #define BRAKE_MS 2000
 #define WAIT_MS 300
 #define POWER_CUT_MS 3000
@@ -112,7 +112,7 @@ uint8_t MIN_FLOOR = 1;
 uint8_t lastTarget = 0;
 
 uint32_t ws_cmd_value = 0;
-uint32_t FloorToFloor_MS = 16500; // only for up dir
+uint32_t FloorToFloor_MS = 18500; // only for up dir
 
 int hreg[8][32];
 
@@ -144,7 +144,7 @@ status_t publish_status = {
 
 state_t moving_state = IDLE;
 read_state curr_slave = INV;
-TRANSIT transit;
+volatile TRANSIT transit;
 
 //******************* END VARIABLE DECLARATIONS**************************
 
@@ -160,11 +160,13 @@ inline void ROTATE(direction_t dir)
     digitalWrite(R_DW, HIGH);
     Serial.println("Move DOWN");
   }
+  delay(100);
 }
 
 inline void BRK_ON()
 {
   digitalWrite(BRK, LOW);
+  delay(100);
   Serial.println("Brake ON");
 }
 
@@ -177,7 +179,9 @@ inline void BRK_OFF()
 inline void M_STP()
 {
   digitalWrite(R_UP, LOW);
+  delay(100);
   digitalWrite(R_DW, LOW);
+  delay(100);
   Serial.println("Motor Stop");
 }
 
@@ -1552,7 +1556,7 @@ void vReceive(void *arg)
 
           btwFloor = true;
           M_STP();
-          BRK_ON();
+          // BRK_ON();
           xQueueReset(xQueueGetDirection);
           TARGET = 0;
           moving_state = IDLE;
@@ -1587,6 +1591,8 @@ void ARDUINO_ISR_ATTR ISR_LowerLim()
     return; // debounce 50ms
   lastLowerLim = now;
 
+  if (transit.dir == UP) return;
+  
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
   doneTransit(MIN_FLOOR, false, IDLE);
@@ -1595,7 +1601,7 @@ void ARDUINO_ISR_ATTR ISR_LowerLim()
   {
     Serial.println("finish command toLanding");
     emergency = false;
-    BRK_OFF();
+    // BRK_OFF();
     digitalWrite(R_POWER_CUT, HIGH);
     publish_status.mode = NORMAL;
   }
