@@ -10,10 +10,10 @@ enum direction_t
   DOWN
 };
 
-
 enum state_t
 {
   IDLE,
+  WAITING,
   MOVING,
 };
 
@@ -29,7 +29,6 @@ enum read_state
   PLC,
   INV,
 };
-
 
 typedef struct
 {

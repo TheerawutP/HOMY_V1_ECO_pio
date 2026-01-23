@@ -14,12 +14,13 @@
 #include "SPIFFS.h"
 #include <ModbusMaster.h>
 #include <Preferences.h>
+
 #include "elevatorTypes.h"
 #include "elevatorStorage.h"
 
 // gpio
-#define PIN_RX 16 // 15
-#define PIN_TX 15 // 5
+#define PIN_RX 16 
+#define PIN_TX 15
 #define WIFI_READY 13
 
 #define RFReceiver 23
@@ -28,7 +29,7 @@
 #define R_UP 19        // Relay UP
 #define R_DW 18        // Relay DOWN
 #define R_POWER_CUT 17 // Relay 4
-#define BRK 5          // brake        //16
+#define BRK 5          // brake   
 #define NP 25
 #define CS 21
 #define RST_SYS 4
@@ -40,6 +41,7 @@
 #define toFloor2 174740
 #define POWER_CUT 174738
 #define STOP 174737
+
 #define GO_UP 5259521
 #define GO_DW 5259528
 #define GO_STOP 5259524
@@ -109,7 +111,7 @@ volatile uint8_t TARGET = 0;
 
 uint8_t MAX_FLOOR = 2;
 uint8_t MIN_FLOOR = 1;
-uint8_t lastTarget = 0;
+uint8_t lastDiffTarget = 0;
 
 uint32_t ws_cmd_value = 0;
 uint32_t FloorToFloor_MS = 18500; // only for up dir
@@ -183,9 +185,9 @@ inline void BRK_OFF()
 inline void M_STP()
 {
   digitalWrite(R_UP, LOW);
-  delay(100);
+  // delay(100);
   digitalWrite(R_DW, LOW);
-  delay(100);
+  // delay(100);
   Serial.println("Motor Stop");
 }
 
@@ -1369,6 +1371,8 @@ void vGetDirection(void *arg)
     if (xQueueReceive(xQueueGetDirection, &target, portMAX_DELAY) == pdTRUE)
     {
 
+      moving_state = WAITING;
+
       if (POS != target)
       {
         dir = (target > POS) ? UP : DOWN;
@@ -1376,14 +1380,16 @@ void vGetDirection(void *arg)
         transit.floor = target;
         transit.dir = dir;
 
+        lastDiffTarget = target;
+
         xTimerStart(xWaitTimer, 0);
       }
       else
       {
         if (btwFloor == true)
         {
-          if (lastTarget > POS) transit.dir = DOWN;
-          if (lastTarget < POS) transit.dir = UP;
+          if (lastDiffTarget > POS) transit.dir = DOWN;
+          if (lastDiffTarget < POS) transit.dir = UP;
 
           transit.floor = target;
 
@@ -1473,7 +1479,7 @@ void vReceive(void *arg)
 
   static unsigned long lastTimeCmd1 = 0;
   static unsigned long lastTimeCmd2 = 0;
-  const unsigned long DEBOUNCE_DELAY = 5000;
+  const unsigned long DEBOUNCE_DELAY = 3000;
 
   for (;;)
   {
@@ -1551,14 +1557,14 @@ void vReceive(void *arg)
           strcpy(publish_status.cmd, "STOP");
           Serial.println("received STOP cmd");
           xTimerStop(xStopTransitTimer, 0);
+          
+          if(moving_state == MOVING) btwFloor = true; 
+          // if (POS != transit.floor)
+          // {
+          //   lastDiffTarget = transit.floor;
+          // }
+          // lastDir = transit.dir;
 
-          if (POS != transit.floor)
-          {
-            lastTarget = transit.floor;
-          }
-          lastDir = transit.dir;
-
-          btwFloor = true;
           M_STP();
           // BRK_ON();
           xQueueReset(xQueueGetDirection);
@@ -1603,7 +1609,7 @@ void ARDUINO_ISR_ATTR ISR_LowerLim()
 
   if (emergency == true)
   {
-    Serial.println("finish command toLanding");
+    // Serial.println("finish command toLanding");
     emergency = false;
     // BRK_OFF();
     digitalWrite(R_POWER_CUT, HIGH);
