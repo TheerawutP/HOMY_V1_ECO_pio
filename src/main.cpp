@@ -153,10 +153,14 @@ inline void ROTATE(direction_t dir)
   if (dir == UP)
   {
     digitalWrite(R_UP, HIGH);
+    delay(100);
+    digitalWrite(R_DW, LOW);
     Serial.println("Move UP");
   }
   else if (dir == DOWN)
   {
+    digitalWrite(R_UP, LOW);
+    delay(100);
     digitalWrite(R_DW, HIGH);
     Serial.println("Move DOWN");
   }
