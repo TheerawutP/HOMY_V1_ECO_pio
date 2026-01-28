@@ -126,8 +126,8 @@ volatile unsigned long lastUpperLim = 0;
 volatile unsigned long lastNoPowerISR = 0;
 volatile unsigned long lastResetSysISR = 0;
 
-bool emergency = false;
-bool btwFloor = false;
+volatile bool emergency = false;
+ bool btwFloor = false;
 bool ws_cmd = false;
 bool hasChanged = true;
 
@@ -155,24 +155,20 @@ inline void ROTATE(direction_t dir)
   if (dir == UP)
   {
     digitalWrite(R_UP, HIGH);
-    delay(100);
     digitalWrite(R_DW, LOW);
     Serial.println("Move UP");
   }
   else if (dir == DOWN)
   {
     digitalWrite(R_UP, LOW);
-    delay(100);
     digitalWrite(R_DW, HIGH);
     Serial.println("Move DOWN");
   }
-  delay(100);
 }
 
 inline void BRK_ON()
 {
-  digitalWrite(BRK, LOW);
-  delay(100);
+  digitalWrite(BRK, LOW);          
   Serial.println("Brake ON");
 }
 
@@ -185,9 +181,7 @@ inline void BRK_OFF()
 inline void M_STP()
 {
   digitalWrite(R_UP, LOW);
-  // delay(100);
   digitalWrite(R_DW, LOW);
-  // delay(100);
   Serial.println("Motor Stop");
 }
 
@@ -1424,6 +1418,7 @@ void vLanding(void *arg)
         // publish_status.mode = NORMAL;
         // publish_status.isBrake = false;
         // hasChanged = true;
+        BRK_ON();
         vTaskSuspend(NULL);
         continue;
       }
@@ -1431,12 +1426,15 @@ void vLanding(void *arg)
       BRK_ON();
       TARGET = MIN_FLOOR;
       moving_state = MOVING;
+      transit.dir = DOWN;
+
       publish_status.state = moving_state;
       publish_status.targetFloor = TARGET;
+      publish_status.dir = transit.dir;
       publish_status.isBrake = true;
       hasChanged = true;
 
-      vTaskDelay(pdMS_TO_TICKS(2000));
+      vTaskDelay(pdMS_TO_TICKS(3000));
 
       BRK_OFF();
       publish_status.isBrake = false;
@@ -1458,7 +1456,7 @@ void vWaitToTransit(TimerHandle_t xTimer)
 void vStopTransit(TimerHandle_t xTimer)
 {
   M_STP();
-  // BRK_ON();
+  BRK_ON();
   moving_state = IDLE;
   btwFloor = false;
   POS = publish_status.targetFloor; // update current position
@@ -1601,19 +1599,19 @@ void ARDUINO_ISR_ATTR ISR_LowerLim()
     return; // debounce 50ms
   lastLowerLim = now;
 
-  if (transit.dir == UP) return;
-  
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-
-  doneTransit(MIN_FLOOR, false, IDLE);
-
-  if (emergency == true)
+  
+    if (emergency == true)
   {
     // Serial.println("finish command toLanding");
+    BRK_ON();
+    // digitalWrite(R_POWER_CUT, HIGH);
     emergency = false;
-    // BRK_OFF();
-    digitalWrite(R_POWER_CUT, HIGH);
     publish_status.mode = NORMAL;
+  }
+  
+  if(transit.dir != UP){
+    doneTransit(MIN_FLOOR, false, IDLE);
   }
 
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
@@ -1741,7 +1739,7 @@ void setup()
   // attachInterrupt(floorSensor2, ISR_UpperLim, FALLING);
 
   pinMode(NP, INPUT); // normal pull-up by using external resistor
-  // attachInterrupt(NP, ISR_Landing, FALLING);
+  attachInterrupt(NP, ISR_Landing, FALLING);
 
   pinMode(CS, OUTPUT);
   digitalWrite(CS, HIGH); // rf always waked up
@@ -1751,6 +1749,7 @@ void setup()
 
   digitalWrite(R_POWER_CUT, HIGH);
   M_STP;
+  BRK_ON();
 
   xSemTransit = xSemaphoreCreateBinary();
   xSemDoneTransit = xSemaphoreCreateBinary();
