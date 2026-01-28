@@ -20,7 +20,7 @@
 
 // gpio
 #define PIN_RX 16 
-#define PIN_TX 15
+#define PIN_TX 17
 #define WIFI_READY 13
 
 #define RFReceiver 23
@@ -28,7 +28,7 @@
 #define floorSensor2 33
 #define R_UP 19        // Relay UP
 #define R_DW 18        // Relay DOWN
-#define R_POWER_CUT 17 // Relay 4
+#define R_POWER_CUT 15 // Relay 4
 #define BRK 5          // brake   
 #define NP 25
 #define CS 21
