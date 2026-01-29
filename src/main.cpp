@@ -19,7 +19,7 @@
 #include "elevatorStorage.h"
 
 // gpio
-#define PIN_RX 16 
+#define PIN_RX 16
 #define PIN_TX 17
 #define WIFI_READY 13
 
@@ -29,7 +29,7 @@
 #define R_UP 19        // Relay UP
 #define R_DW 18        // Relay DOWN
 #define R_POWER_CUT 15 // Relay 4
-#define BRK 5          // brake   
+#define BRK 5          // brake
 #define NP 25
 #define CS 21
 #define RST_SYS 4
@@ -127,7 +127,7 @@ volatile unsigned long lastNoPowerISR = 0;
 volatile unsigned long lastResetSysISR = 0;
 
 volatile bool emergency = false;
- bool btwFloor = false;
+bool btwFloor = false;
 bool ws_cmd = false;
 bool hasChanged = true;
 
@@ -142,7 +142,6 @@ status_t publish_status = {
     false,
     NORMAL,
     0};
-
 
 state_t moving_state = IDLE;
 read_state curr_slave = INV;
@@ -168,7 +167,7 @@ inline void ROTATE(direction_t dir)
 
 inline void BRK_ON()
 {
-  digitalWrite(BRK, LOW);          
+  digitalWrite(BRK, LOW);
   Serial.println("Brake ON");
 }
 
@@ -196,6 +195,8 @@ inline void M_DW()
   digitalWrite(R_DW, HIGH);
   Serial.println("Move Down");
 }
+
+// void updateState()
 
 String statusToJson_ELE(const status_t status)
 {
@@ -1382,8 +1383,10 @@ void vGetDirection(void *arg)
       {
         if (btwFloor == true)
         {
-          if (lastDiffTarget > POS) transit.dir = DOWN;
-          if (lastDiffTarget < POS) transit.dir = UP;
+          if (lastDiffTarget > POS)
+            transit.dir = DOWN;
+          if (lastDiffTarget < POS)
+            transit.dir = UP;
 
           transit.floor = target;
 
@@ -1435,6 +1438,13 @@ void vLanding(void *arg)
       hasChanged = true;
 
       vTaskDelay(pdMS_TO_TICKS(3000));
+
+      if (POS == MIN_FLOOR && btwFloor == false)
+      {
+        BRK_ON();
+        vTaskSuspend(NULL);
+        continue;
+      }
 
       BRK_OFF();
       publish_status.isBrake = false;
@@ -1555,8 +1565,9 @@ void vReceive(void *arg)
           strcpy(publish_status.cmd, "STOP");
           Serial.println("received STOP cmd");
           xTimerStop(xStopTransitTimer, 0);
-          
-          if(moving_state == MOVING) btwFloor = true; 
+
+          if (moving_state == MOVING)
+            btwFloor = true;
           // if (POS != transit.floor)
           // {
           //   lastDiffTarget = transit.floor;
@@ -1600,8 +1611,8 @@ void ARDUINO_ISR_ATTR ISR_LowerLim()
   lastLowerLim = now;
 
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-  
-    if (emergency == true)
+
+  if (emergency == true)
   {
     // Serial.println("finish command toLanding");
     BRK_ON();
@@ -1609,8 +1620,9 @@ void ARDUINO_ISR_ATTR ISR_LowerLim()
     emergency = false;
     publish_status.mode = NORMAL;
   }
-  
-  if(transit.dir != UP){
+
+  if (transit.dir != UP)
+  {
     doneTransit(MIN_FLOOR, false, IDLE);
   }
 
@@ -1640,12 +1652,13 @@ void ARDUINO_ISR_ATTR ISR_Landing()
 
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-  emergency = true;
-  publish_status.mode = EMERGENCY;
-  hasChanged = true;
-
   if ((POS != MIN_FLOOR) || (btwFloor == true))
   {
+
+    emergency = true;
+    publish_status.mode = EMERGENCY;
+    hasChanged = true;
+
     xTaskResumeFromISR(xLandingHandle);
     xSemaphoreGiveFromISR(xSemLanding, &xHigherPriorityTaskWoken);
   }
@@ -1766,16 +1779,16 @@ void setup()
   xPowerCutTimer = xTimerCreate("PowerCutTimer", POWER_CUT_MS, pdFALSE, NULL, vCutPower);
   // xDisbrakeTimer = xTimerCreate("DisbrakeTimer", BRAKE_MS, pdFALSE, NULL, vDisbrake);
 
-  xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 3, NULL);
-  xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, &xPublishHandle);
+  xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 3, NULL);        // blocked
+  xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, &xPublishHandle); // blocked
   xTaskCreate(vReceive, "Receive", 1024, NULL, 2, NULL);
-  xTaskCreate(vGetDirection, "GetDirection", 1024, NULL, 3, NULL);
-  xTaskCreate(vTransit, "Transit", 1024, NULL, 3, NULL);
-  xTaskCreate(vLanding, "Landing", 2048, NULL, 4, &xLandingHandle);
-  xTaskCreate(vStatusLogger, "StatusLogger", 4096, NULL, 2, NULL);
+  xTaskCreate(vGetDirection, "GetDirection", 1024, NULL, 3, NULL);  // blocked
+  xTaskCreate(vTransit, "Transit", 1024, NULL, 3, NULL);            // blocked
+  xTaskCreate(vLanding, "Landing", 2048, NULL, 4, &xLandingHandle); // blocked
+  xTaskCreate(vStatusLogger, "StatusLogger", 4096, NULL, 2, NULL);  // blocked
   xTaskCreate(vPublishInverterTask, "PublishInverter", 4096, NULL, 3, NULL);
-  xTaskCreate(vPollingTask, "Polling", 4096, NULL, 3, NULL);
-  xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 3, NULL);
+  xTaskCreate(vPollingTask, "Polling", 4096, NULL, 3, NULL);   // blocked
+  xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 3, NULL); // blocked
   // xTaskCreate(vStopper, "Stopper", 1024, NULL, 4, NULL);
   delay(500);
 
