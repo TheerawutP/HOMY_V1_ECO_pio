@@ -1437,7 +1437,7 @@ void vLanding(void *arg)
       publish_status.isBrake = true;
       hasChanged = true;
 
-      vTaskDelay(pdMS_TO_TICKS(3000));
+      vTaskDelay(pdMS_TO_TICKS(3500));
 
       if (POS == MIN_FLOOR && btwFloor == false)
       {
@@ -1447,10 +1447,10 @@ void vLanding(void *arg)
       }
 
       BRK_OFF();
-      publish_status.isBrake = false;
-      hasChanged = true;
+      // publish_status.isBrake = false;
+      // hasChanged = true;
 
-      vTaskDelay(pdMS_TO_TICKS(500));
+      vTaskDelay(pdMS_TO_TICKS(100));
 
       xSemaphoreGive(xSemLanding);
     }
