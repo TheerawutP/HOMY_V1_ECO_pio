@@ -1437,7 +1437,7 @@ void vLanding(void *arg)
       publish_status.isBrake = true;
       hasChanged = true;
 
-      vTaskDelay(pdMS_TO_TICKS(3000));
+      vTaskDelay(pdMS_TO_TICKS(2000));
 
       if (POS == MIN_FLOOR && btwFloor == false)
       {
