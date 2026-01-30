@@ -1327,7 +1327,7 @@ void vPollingTask(void *pvParams)
       // curr_slave = PLC;
       break;
     }
-    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 
