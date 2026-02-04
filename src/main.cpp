@@ -1603,225 +1603,301 @@ void vCutPower(TimerHandle_t xTimer)
   digitalWrite(R_POWER_CUT, HIGH);
 }
 
-void ARDUINO_ISR_ATTR ISR_LowerLim()
+void vLowerLimMonitor(void *pvParameters)
 {
-  unsigned long now = millis();
-  if (now - lastLowerLim < DEBOUNCE_MS)
-    return; // debounce 50ms
-  lastLowerLim = now;
+  uint8_t floor1_counter = 0;
+  const uint8_t STABLE_THRESHOLD = 6;
 
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-
-  if (emergency == true)
+  for (;;)
   {
-    // Serial.println("finish command toLanding");
-    BRK_ON();
-    // digitalWrite(R_POWER_CUT, HIGH);
-    emergency = false;
-    publish_status.mode = NORMAL;
-  }
+    bool raw_sensor1 = (digitalRead(floorSensor1) == LOW);
+    if (raw_sensor1)
+    {
+      if (floor1_counter < STABLE_THRESHOLD)
+        floor1_counter++;
+    }
+    else
+    {
+      floor1_counter = 0;
+    }
 
-  if (transit.dir != UP)
-  {
-    doneTransit(MIN_FLOOR, false, IDLE);
-  }
+    bool isAtFloor1 = (floor1_counter >= STABLE_THRESHOLD);
+    if (isAtFloor1 == true)
+    {
 
-  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+      doneTransit(MIN_FLOOR, false, IDLE);
+      if (emergency == true)
+      {
+        BRK_ON();
+        emergency = false;
+        publish_status.mode = NORMAL;
+      }
+    }
+      vTaskDelay(pdMS_TO_TICKS(20));
+  }
 }
 
-void ARDUINO_ISR_ATTR ISR_UpperLim()
+void vNoPowerMonitor(void *pvParameters)
 {
-  unsigned long now = millis();
-  if (now - lastUpperLim < DEBOUNCE_MS)
-    return;
-  lastUpperLim = now;
+  uint8_t NoPower_counter = 0;
+  const uint8_t STABLE_THRESHOLD = 6;
 
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  for (;;)
+  {
+    bool raw_sensor1 = (digitalRead(floorSensor1) == LOW);
+    if (raw_sensor1)
+    {
+      if (NoPower_counter < STABLE_THRESHOLD)
+        NoPower_counter++;
+    }
+    else
+    {
+      NoPower_counter = 0;
+    }
 
-  doneTransit(MAX_FLOOR, false, IDLE);
+    bool isNoPower = (NoPower_counter >= STABLE_THRESHOLD);
 
-  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    if (isNoPower == true)
+    {
+      if ((POS != MIN_FLOOR) || (btwFloor == true))
+      {
+
+        emergency = true;
+        publish_status.mode = EMERGENCY;
+        hasChanged = true;
+
+        vTaskResume(xLandingHandle);
+        xSemaphoreGive(xSemLanding);
+      }
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
 }
 
-void ARDUINO_ISR_ATTR ISR_Landing()
-{
-  unsigned long now = millis();
-  if (now - lastNoPowerISR < DEBOUNCE_MS)
-    return;
-  lastNoPowerISR = now;
-
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-
-  if ((POS != MIN_FLOOR) || (btwFloor == true))
-  {
-
-    emergency = true;
-    publish_status.mode = EMERGENCY;
-    hasChanged = true;
-
-    xTaskResumeFromISR(xLandingHandle);
-    xSemaphoreGiveFromISR(xSemLanding, &xHigherPriorityTaskWoken);
-  }
-  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-}
-
-void ARDUINO_ISR_ATTR ISR_ResetSystem()
-{
-  unsigned long now = millis();
-  if (now - lastResetSysISR < DEBOUNCE_MS)
-    return;
-  lastResetSysISR = now;
-  // Serial.println("Reset System, Back to Floor1");
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-
-  if (POS != 1)
-  {
-    transit.floor = 1;
-    transit.dir = DOWN;
-    publish_status.targetFloor = 1;
-    publish_status.dir = DOWN;
-    hasChanged = true;
-    xSemaphoreGiveFromISR(xSemTransit, &xHigherPriorityTaskWoken);
-  }
-
-  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-}
-
-void setup()
-{
-  Serial.begin(115200);
-  Serial1.begin(38400, SERIAL_8E1, PIN_RX, PIN_TX);
-  node.begin(Inverter_slaveID, Serial1);
-  while (!Serial)
-    ;
-
-  Serial.println("Welcome to Ximplex_KIT");
-  delay(500);
-
-  // ############################### SPIFFS STARTUP #######################################
-  if (!SPIFFS.begin(true))
-  {
-    Serial.println("An Error has occurred while mounting SPIFFS");
-    return;
-  }
-
-  loadStatus();
-  delay(500);
-
-  RF.enableReceive(RFReceiver);
-  delay(500);
-
-  bool m_autoconnected_attempt_succeeded = false;
-  m_autoconnected_attempt_succeeded = connectAttempt("", ""); // uses SSID/PWD stored in ESP32 secret memory.....
-  if (!m_autoconnected_attempt_succeeded)
-  {
-    // try SSID/PWD from file...
-    Serial.println("Failed to connect.");
-    String m_filenametopass = "/credentials.JSON";
-    m_autoconnected_attempt_succeeded = readSSIDPWDfile(m_filenametopass);
-  }
-  if (!m_autoconnected_attempt_succeeded)
-  {
-    setUpAPService();
-    runWifiPortal();
-  }
-
-  MDNS.begin("ximplex_ws");
-
-  server.reset(); // try putting this in setup
-  configureserver();
-
-  m_websocketserver.begin();
-  m_websocketserver.onEvent(onWebSocketEvent); // Start WebSocket server and assign callback
-
-  delay(500);
-
-  // wifiClient.setInsecure();
-  Serial.println(WiFi.localIP());
-  setupMQTT();
-
-  pinMode(WIFI_READY, OUTPUT);
-  pinMode(R_UP, OUTPUT);
-  pinMode(R_DW, OUTPUT);
-  pinMode(R_POWER_CUT, OUTPUT);
-  pinMode(BRK, OUTPUT);
-
-  pinMode(floorSensor1, INPUT); // normal pull-up by using external resistor
-  pinMode(floorSensor2, INPUT); // normal pull-up by using external resistor
-  attachInterrupt(floorSensor1, ISR_LowerLim, FALLING);
-  // attachInterrupt(floorSensor2, ISR_UpperLim, FALLING);
-
-  pinMode(NP, INPUT); // normal pull-up by using external resistor
-  attachInterrupt(NP, ISR_Landing, FALLING);
-
-  pinMode(CS, OUTPUT);
-  digitalWrite(CS, HIGH); // rf always waked up
-
-  pinMode(RST_SYS, INPUT_PULLUP);
-  // attachInterrupt(RST_SYS, ISR_ResetSystem, FALLING);
-
-  digitalWrite(R_POWER_CUT, HIGH);
-  M_STP;
-  BRK_ON();
-
-  xSemTransit = xSemaphoreCreateBinary();
-  xSemDoneTransit = xSemaphoreCreateBinary();
-  xSemLanding = xSemaphoreCreateBinary();
-
-  xTransitMutex = xSemaphoreCreateMutex();
-  mqttMutex = xSemaphoreCreateMutex();
-  hasChangedMutex = xSemaphoreCreateMutex();
-
-  xQueueGetDirection = xQueueCreate(1, sizeof(uint8_t));
-
-  xWaitTimer = xTimerCreate("WaitTimer", WAIT_MS, pdFALSE, NULL, vWaitToTransit);
-  xStopTransitTimer = xTimerCreate("StopTransitTimer", 100, pdFALSE, NULL, vStopTransit);
-  xPowerCutTimer = xTimerCreate("PowerCutTimer", POWER_CUT_MS, pdFALSE, NULL, vCutPower);
-  // xDisbrakeTimer = xTimerCreate("DisbrakeTimer", BRAKE_MS, pdFALSE, NULL, vDisbrake);
-
-  xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 3, NULL);        // blocked
-  xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, &xPublishHandle); // blocked
-  xTaskCreate(vReceive, "Receive", 1024, NULL, 2, NULL);
-  xTaskCreate(vGetDirection, "GetDirection", 1024, NULL, 3, NULL);  // blocked
-  xTaskCreate(vTransit, "Transit", 1024, NULL, 3, NULL);            // blocked
-  xTaskCreate(vLanding, "Landing", 2048, NULL, 4, &xLandingHandle); // blocked
-  xTaskCreate(vStatusLogger, "StatusLogger", 4096, NULL, 2, NULL);  // blocked
-  xTaskCreate(vPublishInverterTask, "PublishInverter", 4096, NULL, 3, NULL);
-  xTaskCreate(vPollingTask, "Polling", 4096, NULL, 3, NULL);   // blocked
-  xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 3, NULL); // blocked
-  // xTaskCreate(vStopper, "Stopper", 1024, NULL, 4, NULL);
-  delay(500);
-
-  Serial.print("Heap free memory (in bytes)= ");
-  Serial.println(ESP.getFreeHeap());
-  Serial.println(F("Setup complete."));
-  delay(500);
-}
-
-void loop()
-{
-
-  // if (RF.available())
+  // void ARDUINO_ISR_ATTR ISR_LowerLim()
   // {
-  //   Serial.println(RF.getReceivedValue());
-  //   Serial.println(RF.getReceivedBitlength());
-  //   Serial.println(RF.getReceivedDelay());
-  //   Serial.println(RF.getReceivedProtocol());
-  //   RF.resetAvailable();
+  //   unsigned long now = millis();
+  //   if (now - lastLowerLim < DEBOUNCE_MS)
+  //     return; // debounce 50ms
+  //   lastLowerLim = now;
+
+  //   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+  //   if (emergency == true)
+  //   {
+  //     // Serial.println("finish command toLanding");
+  //     BRK_ON();
+  //     // digitalWrite(R_POWER_CUT, HIGH);
+  //     emergency = false;
+  //     publish_status.mode = NORMAL;
+  //   }
+
+  //   if (transit.dir != UP)
+  //   {
+  //     doneTransit(MIN_FLOOR, false, IDLE);
+  //   }
+
+  //   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
   // }
 
-  Serial.print("curr_pos in fs: ");
-  Serial.print(POS);
-
-  if (btwFloor == true)
+  void ARDUINO_ISR_ATTR ISR_UpperLim()
   {
-    Serial.println(" (btwFloor)");
-  }
-  else
-  {
-    Serial.println(" ");
+    unsigned long now = millis();
+    if (now - lastUpperLim < DEBOUNCE_MS)
+      return;
+    lastUpperLim = now;
+
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    doneTransit(MAX_FLOOR, false, IDLE);
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
   }
 
-  Serial.println("----------");
-  vTaskDelay(5000);
-}
+  // void ARDUINO_ISR_ATTR ISR_Landing()
+  // {
+  //   unsigned long now = millis();
+  //   if (now - lastNoPowerISR < DEBOUNCE_MS)
+  //     return;
+  //   lastNoPowerISR = now;
+
+  //   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+  //   if ((POS != MIN_FLOOR) || (btwFloor == true))
+  //   {
+
+  //     emergency = true;
+  //     publish_status.mode = EMERGENCY;
+  //     hasChanged = true;
+
+  //     xTaskResumeFromISR(xLandingHandle);
+  //     xSemaphoreGiveFromISR(xSemLanding, &xHigherPriorityTaskWoken);
+  //   }
+  //   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+  // }
+
+  void ARDUINO_ISR_ATTR ISR_ResetSystem()
+  {
+    unsigned long now = millis();
+    if (now - lastResetSysISR < DEBOUNCE_MS)
+      return;
+    lastResetSysISR = now;
+    // Serial.println("Reset System, Back to Floor1");
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    if (POS != 1)
+    {
+      transit.floor = 1;
+      transit.dir = DOWN;
+      publish_status.targetFloor = 1;
+      publish_status.dir = DOWN;
+      hasChanged = true;
+      xSemaphoreGiveFromISR(xSemTransit, &xHigherPriorityTaskWoken);
+    }
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+  }
+
+  void setup()
+  {
+    Serial.begin(115200);
+    Serial1.begin(38400, SERIAL_8E1, PIN_RX, PIN_TX);
+    node.begin(Inverter_slaveID, Serial1);
+    while (!Serial)
+      ;
+
+    Serial.println("Welcome to Ximplex_KIT");
+    delay(500);
+
+    // ############################### SPIFFS STARTUP #######################################
+    if (!SPIFFS.begin(true))
+    {
+      Serial.println("An Error has occurred while mounting SPIFFS");
+      return;
+    }
+
+    loadStatus();
+    delay(500);
+
+    RF.enableReceive(RFReceiver);
+    delay(500);
+
+    bool m_autoconnected_attempt_succeeded = false;
+    m_autoconnected_attempt_succeeded = connectAttempt("", ""); // uses SSID/PWD stored in ESP32 secret memory.....
+    if (!m_autoconnected_attempt_succeeded)
+    {
+      // try SSID/PWD from file...
+      Serial.println("Failed to connect.");
+      String m_filenametopass = "/credentials.JSON";
+      m_autoconnected_attempt_succeeded = readSSIDPWDfile(m_filenametopass);
+    }
+    if (!m_autoconnected_attempt_succeeded)
+    {
+      setUpAPService();
+      runWifiPortal();
+    }
+
+    MDNS.begin("ximplex_ws");
+
+    server.reset(); // try putting this in setup
+    configureserver();
+
+    m_websocketserver.begin();
+    m_websocketserver.onEvent(onWebSocketEvent); // Start WebSocket server and assign callback
+
+    delay(500);
+
+    // wifiClient.setInsecure();
+    Serial.println(WiFi.localIP());
+    setupMQTT();
+
+    pinMode(WIFI_READY, OUTPUT);
+    pinMode(R_UP, OUTPUT);
+    pinMode(R_DW, OUTPUT);
+    pinMode(R_POWER_CUT, OUTPUT);
+    pinMode(BRK, OUTPUT);
+
+    pinMode(floorSensor1, INPUT); // normal pull-up by using external resistor
+    pinMode(floorSensor2, INPUT); // normal pull-up by using external resistor
+    // attachInterrupt(floorSensor1, ISR_LowerLim, FALLING);
+    // attachInterrupt(floorSensor2, ISR_UpperLim, FALLING);
+
+    pinMode(NP, INPUT); // normal pull-up by using external resistor
+    // attachInterrupt(NP, ISR_Landing, FALLING);
+
+    pinMode(CS, OUTPUT);
+    digitalWrite(CS, HIGH); // rf always waked up
+
+    pinMode(RST_SYS, INPUT_PULLUP);
+    // attachInterrupt(RST_SYS, ISR_ResetSystem, FALLING);
+
+    digitalWrite(R_POWER_CUT, HIGH);
+    M_STP;
+    BRK_ON();
+
+    xSemTransit = xSemaphoreCreateBinary();
+    xSemDoneTransit = xSemaphoreCreateBinary();
+    xSemLanding = xSemaphoreCreateBinary();
+
+    xTransitMutex = xSemaphoreCreateMutex();
+    mqttMutex = xSemaphoreCreateMutex();
+    hasChangedMutex = xSemaphoreCreateMutex();
+
+    xQueueGetDirection = xQueueCreate(1, sizeof(uint8_t));
+
+    xWaitTimer = xTimerCreate("WaitTimer", WAIT_MS, pdFALSE, NULL, vWaitToTransit);
+    xStopTransitTimer = xTimerCreate("StopTransitTimer", 100, pdFALSE, NULL, vStopTransit);
+    xPowerCutTimer = xTimerCreate("PowerCutTimer", POWER_CUT_MS, pdFALSE, NULL, vCutPower);
+    // xDisbrakeTimer = xTimerCreate("DisbrakeTimer", BRAKE_MS, pdFALSE, NULL, vDisbrake);
+
+    xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 3, NULL);        // blocked
+    xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, &xPublishHandle); // blocked
+    xTaskCreate(vReceive, "Receive", 1024, NULL, 2, NULL);
+    xTaskCreate(vGetDirection, "GetDirection", 1024, NULL, 3, NULL);  // blocked
+    xTaskCreate(vTransit, "Transit", 1024, NULL, 3, NULL);            // blocked
+    xTaskCreate(vLanding, "Landing", 2048, NULL, 4, &xLandingHandle); // blocked
+    xTaskCreate(vStatusLogger, "StatusLogger", 4096, NULL, 2, NULL);  // blocked
+    xTaskCreate(vPublishInverterTask, "PublishInverter", 4096, NULL, 3, NULL);
+    xTaskCreate(vPollingTask, "Polling", 4096, NULL, 3, NULL);   // blocked
+    xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 3, NULL); // blocked
+
+    xTaskCreate(vLowerLimMonitor, "LowerLimMonitor", 512, NULL, 3, NULL);
+    xTaskCreate(vNoPowerMonitor, "NoPowerMonitor", 512, NULL, 3, NULL);
+
+    // xTaskCreate(vStopper, "Stopper", 1024, NULL, 4, NULL);
+    delay(500);
+
+    Serial.print("Heap free memory (in bytes)= ");
+    Serial.println(ESP.getFreeHeap());
+    Serial.println(F("Setup complete."));
+    delay(500);
+  }
+
+  void loop()
+  {
+
+    // if (RF.available())
+    // {
+    //   Serial.println(RF.getReceivedValue());
+    //   Serial.println(RF.getReceivedBitlength());
+    //   Serial.println(RF.getReceivedDelay());
+    //   Serial.println(RF.getReceivedProtocol());
+    //   RF.resetAvailable();
+    // }
+
+    Serial.print("curr_pos in fs: ");
+    Serial.print(POS);
+
+    if (btwFloor == true)
+    {
+      Serial.println(" (btwFloor)");
+    }
+    else
+    {
+      Serial.println(" ");
+    }
+
+    Serial.println("----------");
+    vTaskDelay(5000);
+  }
