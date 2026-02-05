@@ -1346,11 +1346,13 @@ void vTransit(void *arg)
       Serial.println("start transit");
       moving_state = MOVING;
       ROTATE(transit.dir);
+      btwFloor = true;
 
       if (transit.dir == UP)
         xTimerChangePeriod(xStopTransitTimer, pdMS_TO_TICKS(FloorToFloor_MS), 0);
       // publish_status.isBrake = false;
       publish_status.state = MOVING;
+      publish_status.btwFloor = btwFloor;
       hasChanged = true;
     }
   }
@@ -1567,7 +1569,7 @@ void vReceive(void *arg)
           xTimerStop(xStopTransitTimer, 0);
 
           if (moving_state == MOVING)
-            btwFloor = true;
+            // btwFloor = true;
           // if (POS != transit.floor)
           // {
           //   lastDiffTarget = transit.floor;
@@ -1606,7 +1608,7 @@ void vCutPower(TimerHandle_t xTimer)
 void vLowerLimMonitor(void *pvParameters)
 {
   uint8_t floor1_counter = 0;
-  const uint8_t STABLE_THRESHOLD = 6;
+  const uint8_t STABLE_THRESHOLD = 20;
 
   for (;;)
   {
@@ -1624,8 +1626,8 @@ void vLowerLimMonitor(void *pvParameters)
     bool isAtFloor1 = (floor1_counter >= STABLE_THRESHOLD);
     if (isAtFloor1 == true)
     {
-
-      doneTransit(MIN_FLOOR, false, IDLE);
+      
+      if(TARGET == MIN_FLOOR) doneTransit(MIN_FLOOR, false, IDLE);
       if (emergency == true)
       {
         BRK_ON();
@@ -1640,12 +1642,12 @@ void vLowerLimMonitor(void *pvParameters)
 void vNoPowerMonitor(void *pvParameters)
 {
   uint8_t NoPower_counter = 0;
-  const uint8_t STABLE_THRESHOLD = 6;
+  const uint8_t STABLE_THRESHOLD = 20;
 
   for (;;)
   {
-    bool raw_sensor1 = (digitalRead(floorSensor1) == LOW);
-    if (raw_sensor1)
+    bool raw_NP = (digitalRead(NP) == LOW);
+    if (raw_NP)
     {
       if (NoPower_counter < STABLE_THRESHOLD)
         NoPower_counter++;
@@ -1862,8 +1864,8 @@ void vNoPowerMonitor(void *pvParameters)
     xTaskCreate(vPollingTask, "Polling", 4096, NULL, 3, NULL);   // blocked
     xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 3, NULL); // blocked
 
-    xTaskCreate(vLowerLimMonitor, "LowerLimMonitor", 512, NULL, 3, NULL);
-    xTaskCreate(vNoPowerMonitor, "NoPowerMonitor", 512, NULL, 3, NULL);
+    xTaskCreate(vLowerLimMonitor, "LowerLimMonitor", 1024, NULL, 3, NULL);
+    xTaskCreate(vNoPowerMonitor, "NoPowerMonitor", 1024, NULL, 3, NULL);
 
     // xTaskCreate(vStopper, "Stopper", 1024, NULL, 4, NULL);
     delay(500);
