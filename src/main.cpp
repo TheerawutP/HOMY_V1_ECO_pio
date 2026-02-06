@@ -1,11 +1,11 @@
 
 
 // main helpers
-void eventListener(uint32_t ulNotificationValue)
+void eventListener(uint32_t ulNotificationValue, event_t *emg)
 {
-  emergType_t receivedType = (emergType_t)ulNotifiedValue;
+  emg = (event_t)ulNotifiedValue;
 
-  switch (receivedType)
+  switch (emg)
   {
   case safetySling:
     // handle command received
@@ -15,14 +15,14 @@ void eventListener(uint32_t ulNotificationValue)
     // handle limit switch
     break;
 
-  case NoPowerLanding:
+  case noPowerLanding:
     // handle no power
     break;
 
-  case lostConnection:
+  case pollingTimeout:
     break;
 
-  case ClearCommand:
+  case clearCommand:
     break;
 
   case reachFloor1:
@@ -34,11 +34,22 @@ void eventListener(uint32_t ulNotificationValue)
   default:
     break;
   }
+
 }
 
-void getDir() void abortAll() void stopMotion()
+void getDir(){
 
-    bool readDataFrom(uint8_t slaveID, uint16_t startAddress, uint8_t numRead)
+}
+
+void stopMotion(){
+
+}
+
+void abortAll(){
+
+}
+    
+bool readDataFrom(uint8_t slaveID, uint16_t startAddress, uint8_t numRead)
 {
   node.begin(slaveID, Serial1);
   uint8_t result = node.readHoldingRegisters(startAddress, numRead);
@@ -61,6 +72,37 @@ void getDir() void abortAll() void stopMotion()
   }
 }
 
+void emergencyHandler(event_t emergeType){
+  switch (emergeType){
+    case safetySling:
+      xTaskNotify(xSafetySlingHandle, 1, eSetValueWithOverwrite)
+    break;
+
+    case emergStop:
+          xTaskNotify(xEmergeStopHandle, 1, eSetValueWithOverwrite)
+
+    break;
+
+    case noPowerLanding:
+          xTaskNotify(xNoPowerLandingHandle, 1, eSetValueWithOverwrite)
+
+    break;
+
+    case pollingTimeout:
+          xTaskNotify(xPollingTimeoutHandle, 1, eSetValueWithOverwrite)
+
+    break;
+
+    case clearCommand:
+          xTaskNotify(xClearCommandHandle, 1, eSetValueWithOverwrite)
+    break;
+    
+    default:
+    break;
+
+  }
+}
+
 // other helpers
 
 // central state manager
@@ -69,13 +111,13 @@ void vOchestrator(void *pvParameters)
   uint32_t ulNotificationValue;
   userCommand_t userCommand; // cmdType, source of command
   transitCommand_t command;
-  emergency_t emergType;
+  event_t evtType;
 
   for (;;)
   {
     if (xTaskNotifyWait(0x00, 0xFFFFFFFF, &ulNotificationValue, (Tick_t)10) == pdPASS)
     {
-      eventListener(ulNotificationValue);
+      eventListener(ulNotificationValue, &evtType);
     }
 
     switch (currentState)
@@ -113,7 +155,7 @@ void vOchestrator(void *pvParameters)
       break;
 
     case STATE_EMERGENCY:
-      emergencyHandler(emergType);
+      emergencyHandler(evtType);
       break;
 
     default:
@@ -133,10 +175,12 @@ void vRFReceiver(void *pvParams)
 }
 
 // timer callbacks
-void vStartRunningCallback(TimerHandle_t xTimer)
+void vStartRunningCallback(TimerHandle_t xTimer){
+  currentState = RUNNING;
+}
 
     // polling threads
-    void vPollingModbus()
+void vPollingModbus()
 {
   for (;;)
   {
@@ -227,7 +271,25 @@ void vPollingNoPower(void *pvParams)
 }
 
 // safety threads
-void vAbortAll() void vStopMotion() void vNoPowerLanding() void vPollingTimeout() void vClearCommand()
+void vSafetySling(){
+  for(;;){}
+} 
+
+void vEmergeStop(){
+  for(;;){}
+} 
+
+void vNoPowerLanding(){
+  for(;;){}
+} 
+
+void vPollingTimeout(){
+  for(;;){}
+}  
+
+void vClearCommand(){
+  for(;;){}
+} 
 
     void setup()
 {
