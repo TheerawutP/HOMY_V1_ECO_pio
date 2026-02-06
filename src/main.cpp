@@ -36,33 +36,35 @@ void eventListener(uint32_t ulNotificationValue)
   }
 }
 
-void getDir() void abortAll() void stopMotion() 
+void getDir() void abortAll() void stopMotion()
 
-bool readDataFrom(uint8_t slaveID, uint16_t startAddress, uint8_t numRead) {
+    bool readDataFrom(uint8_t slaveID, uint16_t startAddress, uint8_t numRead)
+{
   node.begin(slaveID, Serial1);
   uint8_t result = node.readHoldingRegisters(startAddress, numRead);
-  
-  if (result == node.ku8MBSuccess) {
-    for (int i = 0; i < numRead; i++) {
+
+  if (result == node.ku8MBSuccess)
+  {
+    for (int i = 0; i < numRead; i++)
+    {
       hreg[slaveID][i] = node.getResponseBuffer(i);
     }
-    return true; 
-
-  } else {
+    return true;
+  }
+  else
+  {
     Serial.print("Error at ID ");
     Serial.print(slaveID);
     Serial.print(": ");
-    Serial.println(result, HEX); 
-    return false; 
+    Serial.println(result, HEX);
+    return false;
   }
 }
 
+// other helpers
 
-
-    // other helpers
-
-    // central state manager
-    void vOchestrator(void *pvParameters)
+// central state manager
+void vOchestrator(void *pvParameters)
 {
   uint32_t ulNotificationValue;
   userCommand_t userCommand; // cmdType, source of command
@@ -123,10 +125,15 @@ bool readDataFrom(uint8_t slaveID, uint16_t startAddress, uint8_t numRead) {
 }
 
 // main threads
-void vRFReceiver()
+void vRFReceiver(void *pvParams)
+{
+  for (;;)
+  {
+  }
+}
 
-    // timer callbacks
-    void vStartRunningCallback(TimerHandle_t xTimer)
+// timer callbacks
+void vStartRunningCallback(TimerHandle_t xTimer)
 
     // polling threads
     void vPollingModbus()
@@ -160,11 +167,69 @@ void vRFReceiver()
   }
 }
 
-void vPollingLowerLim() void vPollingNoPower()
-    // safety threads
-    void vAbortAll() void vStopMotion() void vNoPowerLanding() void vPollingTimeout() void vClearCommand()
+void vPollingLowerLim(void *pvParams) // first floor sensor
+{
+  uint8_t floorSensor1_counter = 0;
+  const uint8_t STABLE_THRESHOLD = 20;
 
-        void setup()
+  for (;;)
+  {
+    bool raw_floorSensor1 = (digitalRead(floorSensor1) == LOW);
+    if (raw_floorSensor1)
+    {
+      if (floorSensor1_counter < STABLE_THRESHOLD)
+        floorSensor1_counter++;
+    }
+    else
+    {
+      floorSensor1_counter = 0;
+    }
+
+    bool isAtFloor1 = (floorSensor1_counter >= STABLE_THRESHOLD);
+
+    if (isAtFloor1 == true)
+    {
+      xTaskNotify(xEventListenerHandle, reachFloor1, eSetValueWithOverwrite)
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+void vPollingNoPower(void *pvParams)
+{
+  for (;;)
+  {
+    uint8_t noPower_counter = 0;
+    const uint8_t STABLE_THRESHOLD = 20;
+
+    for (;;)
+    {
+      bool raw_noPower = (digitalRead(NoPower) == LOW);
+      if (raw_noPower)
+      {
+        if (noPower_counter < STABLE_THRESHOLD)
+          noPower_counter++;
+      }
+      else
+      {
+        noPower_counter = 0;
+      }
+
+      bool isNoPower = (noPower_counter >= STABLE_THRESHOLD);
+
+      if (isNoPower == true)
+      {
+        xTaskNotify(xEventListenerHandle, NoPowerLanding, eSetValueWithOverwrite)
+      }
+      vTaskDelay(pdMS_TO_TICKS(20));
+    }
+  }
+}
+
+// safety threads
+void vAbortAll() void vStopMotion() void vNoPowerLanding() void vPollingTimeout() void vClearCommand()
+
+    void setup()
 {
 }
 
