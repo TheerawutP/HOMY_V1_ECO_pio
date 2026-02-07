@@ -1,51 +1,93 @@
 #ifndef ELEVATOR_TYPES_H
 #define ELEVATOR_TYPES_H
-#include "elevatorTypes.h"
+// #include "elevatorTypes.h"
 #include <Arduino.h>
 
 enum direction_t
 {
-  STAY,
-  UP,
-  DOWN
+  DIR_NONE,
+  DIR_UP,
+  DIR_DOWN
 };
 
 enum state_t
 {
-  IDLE,
-  WAITING,
-  MOVING,
+  STATE_IDLE,
+  STATE_PENDING,
+  STATE_RUNNING,
+  STATE_PAUSED,
+  STATE_EMERGENCY
 };
 
-
-enum elevatorMode_t
+enum modbusStation_t
 {
-  NORMAL,
-  EMERGENCY
-};
-
-enum read_state
-{
-  PLC,
-  INV,
+  INVERTER_STA,
+  CABIN_STA,
+  HALL_STA,
+  VSG_STA
 };
 
 typedef struct
 {
-  char cmd[16];
-  bool isBrake;
+  uint8_t target;
   direction_t dir;
-  state_t state;
+} transitCommand_t;
+
+typedef struct
+{
   uint8_t pos;
+  state_t state;
+  direction_t dir;
+  direction_t lastDir;
+  uint8_t target;
+  uint8_t lastTarget;
+  bool isBrake;
   bool btwFloor;
-  elevatorMode_t mode;
-  uint8_t targetFloor;
 } status_t;
 
 typedef struct
 {
-  uint8_t floor;
-  direction_t dir;
-} TRANSIT;
+  uint8_t *pos;
+  state_t *state;
+  direction_t *dir;
+  direction_t *lastDir;
+  uint8_t *target;
+  uint8_t *lastTarget;
+  bool *isBrake;
+  bool *btwFloor;
+} update_status_t;
 
-#endif
+enum elevatorEvent_t
+{
+  safetySling,
+  emergStop,
+  noPowerLanding,
+  pollingTimeout,
+  clearCommand,
+  reachFloor1,
+  reachFloor2
+};
+
+enum commandType_t
+{
+  moveToFloor,
+  stop,
+  cutPower
+};
+
+enum commandSource_t
+{
+  FROM_RF,
+  FROM_WS,
+  FROM_CABIN,
+  FROM_HALL
+};
+
+typedef struct
+{
+  uint8_t target;
+  commandType_t type;
+  commandSource_t from;
+} userCommand_t;
+
+#endif 
