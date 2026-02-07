@@ -76,6 +76,8 @@ TaskHandle_t xNoPowerLandingHandle;
 TaskHandle_t xPollingTimeoutHandle;
 TaskHandle_t xClearCommandHandle;
 
+TimerHandle_t xStartRunningTimer;
+
 AsyncWebServer server(80);
 WebSocketsServer m_websocketserver = WebSocketsServer(81);
 
@@ -1121,7 +1123,6 @@ void getDir(uint8_t target, transitCommand_t *cmd)
 
 void transit(transitCommand_t cmd)
 {
-  state_t nextState = STATE_RUNNING;
   ROTATE(cmd.dir);
   updateElevator(&elevator, (update_status_t){
                                 .set = {
@@ -1201,12 +1202,41 @@ void vOchestrator(void *pvParameters)
   userCommand_t userCommand; // cmdType, source of command
   transitCommand_t command;  // dir + target
   elevatorEvent_t evtType;
+  uint8_t reachedFloorNum = 0;
 
   for (;;)
   {
     if (xTaskNotifyWait(0x00, 0xFFFFFFFF, &ulNotificationValue, (TickType_t)10) == pdPASS)
     {
       eventListener(ulNotificationValue, &evtType);
+
+
+      if (evtType == reachFloor1)
+        reachedFloorNum = 1;
+
+      else if (evtType == reachFloor2)
+        reachedFloorNum = 2;
+
+      if (reachedFloorNum > 0 && reachedFloorNum == elevator.target)
+      {
+        M_STP();  
+        BRK_ON();
+
+        updateElevator(&elevator, (update_status_t){
+                                      .set = {.pos = true, .state = true, .btwFloor = true},
+                                      .pos = reachedFloorNum,
+                                      .state = STATE_IDLE,
+                                      .btwFloor = true});
+
+        reachedFloorNum = 0; 
+        Serial.printf("Reached Target Floor %d: Stopping...\n", elevator.pos);
+      }
+
+      else if (evtType == emergStop || evtType == safetySling)
+      {
+        elevator.state = STATE_EMERGENCY;
+        emergencyHandler(evtType);
+      }
     }
 
     if (xQueueReceive(xQueueCommand, &userCommand, 0) == pdPASS)
@@ -1216,7 +1246,6 @@ void vOchestrator(void *pvParameters)
 
       switch (cmd)
       {
-      case moveToFloor:
         getDir(targetFloor, &command);
         break;
 
@@ -1236,6 +1265,7 @@ void vOchestrator(void *pvParameters)
       break;
 
     case STATE_PENDING:
+      xTimerStart(xStartRunningTimer, 0);
       updateElevator(&elevator, (update_status_t){
                                     .set = {.state = true},
                                     .state = STATE_RUNNING});
@@ -1251,7 +1281,7 @@ void vOchestrator(void *pvParameters)
       break;
 
     case STATE_EMERGENCY:
-      emergencyHandler(evtType);
+      // emergencyHandler(evtType);
       break;
 
     default:
@@ -1273,7 +1303,7 @@ void vRFReceiver(void *pvParams)
 }
 
 // timer callbacks
-void vStartRunning(xTimer_t timer)
+void vStartRunning(TimerHandle_t xTimer)
 {
   updateElevator(&elevator, (update_status_t){
                                 .set = {.state = true},
@@ -1706,7 +1736,7 @@ void setup()
 
   // xQueueGetDirection = xQueueCreate(1, sizeof(uint8_t));
 
-  // xWaitTimer = xTimerCreate("WaitTimer", WAIT_MS, pdFALSE, NULL, vWaitToTransit);
+  xStartRunningTimer = xTimerCreate("startRunning", WAIT_TO_RUNNING_MS, pdFALSE, NULL, vStartRunning);
   // xStopTransitTimer = xTimerCreate("StopTransitTimer", 100, pdFALSE, NULL, vStopTransit);
   // xPowerCutTimer = xTimerCreate("PowerCutTimer", POWER_CUT_MS, pdFALSE, NULL, vCutPower);
   // xDisbrakeTimer = xTimerCreate("DisbrakeTimer", BRAKE_MS, pdFALSE, NULL, vDisbrake);
