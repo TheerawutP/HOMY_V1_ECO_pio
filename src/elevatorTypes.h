@@ -76,13 +76,14 @@ enum elevatorEvent_t
   pollingTimeout,
   clearCommand,
   reachFloor1,
-  reachFloor2
+  reachFloor2,
 };
 
 enum commandType_t
 {
   moveToFloor,
-  stop,
+  userStop,
+  userEmergStop,
   cutPower
 };
 

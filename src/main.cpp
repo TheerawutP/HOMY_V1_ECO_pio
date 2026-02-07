@@ -1210,7 +1210,6 @@ void vOchestrator(void *pvParameters)
     {
       eventListener(ulNotificationValue, &evtType);
 
-
       if (evtType == reachFloor1)
         reachedFloorNum = 1;
 
@@ -1219,7 +1218,7 @@ void vOchestrator(void *pvParameters)
 
       if (reachedFloorNum > 0 && reachedFloorNum == elevator.target)
       {
-        M_STP();  
+        M_STP();
         BRK_ON();
 
         updateElevator(&elevator, (update_status_t){
@@ -1228,7 +1227,7 @@ void vOchestrator(void *pvParameters)
                                       .state = STATE_IDLE,
                                       .btwFloor = true});
 
-        reachedFloorNum = 0; 
+        reachedFloorNum = 0;
         Serial.printf("Reached Target Floor %d: Stopping...\n", elevator.pos);
       }
 
@@ -1239,6 +1238,7 @@ void vOchestrator(void *pvParameters)
       }
     }
 
+    ////////////handle command////////////////////////////
     if (xQueueReceive(xQueueCommand, &userCommand, 0) == pdPASS)
     {
       commandType_t cmd = userCommand.type;
@@ -1246,532 +1246,616 @@ void vOchestrator(void *pvParameters)
 
       switch (cmd)
       {
-        getDir(targetFloor, &command);
-        break;
+      case moveToFloor:
+      getDir(targetFloor, &command);
+          break;
 
-      case stop:
+          case userStop:
         if (elevator.state == STATE_RUNNING)
+        {
           updateElevator(&elevator, (update_status_t){
                                         .set = {.state = true},
-                                        .state = STATE_RUNNING});
+                                        .state = STATE_PAUSED});
+        }
+        break;
+
       }
+      ////////////handle command////////////////////////////
+
+      switch (elevator.state)
+      {
+
+      case STATE_IDLE:
+        //...
+        break;
+
+      case STATE_PENDING:
+        xTimerStart(xStartRunningTimer, 0);
+        updateElevator(&elevator, (update_status_t){
+                                      .set = {.state = true},
+                                      .state = STATE_RUNNING});
+
+        break;
+
+      case STATE_RUNNING:
+        transit(command);
+        break;
+
+      case STATE_PAUSED:
+        stopMotion();
+        break;
+
+      case STATE_EMERGENCY:
+        // emergencyHandler(evtType);
+        break;
+
+      default:
+        break;
+      }
+
+      vTaskDelay(pdMS_TO_TICKS(10));
     }
-
-    switch (elevator.state)
-    {
-
-    case STATE_IDLE:
-      //...
-      break;
-
-    case STATE_PENDING:
-      xTimerStart(xStartRunningTimer, 0);
-      updateElevator(&elevator, (update_status_t){
-                                    .set = {.state = true},
-                                    .state = STATE_RUNNING});
-
-      break;
-
-    case STATE_RUNNING:
-      transit(command);
-      break;
-
-    case STATE_PAUSED:
-      stopMotion();
-      break;
-
-    case STATE_EMERGENCY:
-      // emergencyHandler(evtType);
-      break;
-
-    default:
-      break;
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
-// main threads
+  // main threads
 
-void vRFReceiver(void *pvParams)
-{
-  for (;;)
+  void vRFReceiver(void *pvParams)
   {
-    vTaskDelay(10);
-  }
-}
-
-// timer callbacks
-void vStartRunning(TimerHandle_t xTimer)
-{
-  updateElevator(&elevator, (update_status_t){
-                                .set = {.state = true},
-                                .state = STATE_RUNNING});
-}
-// polling threads
-
-void vPollingModbus(void *pvParams)
-{
-  uint8_t INVERTER_ID = 1;
-  uint8_t CABIN_ID = 2;
-  uint8_t HALL_ID = 3;
-  uint8_t VSG_ID = 4;
-
-  uint16_t FIRST_REG_INVERTER = 28672;
-  uint16_t FIRST_REG_CABIN = 0;
-  uint16_t FIRST_REG_HALL = 0;
-  uint16_t FIRST_REG_VSG = 0;
-
-  uint16_t NUM_READ_INVERTER = 19;
-  uint16_t NUM_READ_CABIN = 16;
-  uint16_t NUM_READ_HALL = 16;
-  uint16_t NUM_READ_VSG = 16;
-
-  uint16_t pollingData[5][32];
-
-  for (;;)
-  {
-    uint32_t result;
-    switch (currentStation)
-    {
-    case INVERTER_STA:
-      readDataFrom(INVERTER_ID, FIRST_REG_INVERTER, NUM_READ_INVERTER, pollingData[INVERTER_ID]);
-
-      if (pollingData[INVERTER_ID][7] == 992)
-      {
-        xTaskNotify(xOchestratorHandle, clearCommand, eSetValueWithOverwrite);
-      }
-      else if (pollingData[INVERTER_ID][6] > TORQUE_RATED)
-      {
-        xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-      }
-      currentStation = CABIN_STA;
-      break;
-
-    case CABIN_STA:
-      readDataFrom(CABIN_ID, FIRST_REG_CABIN, NUM_READ_CABIN, pollingData[CABIN_ID]);
-      if (pollingData[CABIN_ID][0] == 1)
-      {
-        xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-      }
-      else if (pollingData[CABIN_ID][1] == 1)
-      {
-        xTaskNotify(xOchestratorHandle, safetySling, eSetValueWithOverwrite);
-      }
-
-      currentStation = HALL_STA;
-      break;
-
-    case HALL_STA:
-      readDataFrom(HALL_ID, FIRST_REG_HALL, NUM_READ_HALL, pollingData[HALL_ID]);
-      if (pollingData[HALL_ID][0] == 1 || pollingData[HALL_ID][1] == 1)
-      {
-        xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-      }
-      currentStation = VSG_STA;
-      break;
-
-    case VSG_STA:
-      readDataFrom(VSG_ID, FIRST_REG_VSG, NUM_READ_VSG, pollingData[VSG_ID]);
-
-      currentStation = INVERTER_STA;
-      break;
-    }
-    vTaskDelay(pdMS_TO_TICKS(100));
-  }
-}
-
-void vPollingFloorSensor1(void *pvParams) // first floor sensor
-{
-  uint8_t floorSensor1_counter = 0;
-  const uint8_t STABLE_THRESHOLD = 20;
-
-  for (;;)
-  {
-    bool raw_floorSensor1 = (digitalRead(floorSensor1) == LOW);
-    if (raw_floorSensor1)
-    {
-      if (floorSensor1_counter < STABLE_THRESHOLD)
-        floorSensor1_counter++;
-    }
-    else
-    {
-      floorSensor1_counter = 0;
-    }
-
-    bool isAtFloor1 = (floorSensor1_counter >= STABLE_THRESHOLD);
-
-    if (isAtFloor1 == true)
-    {
-      xTaskNotify(xOchestratorHandle, reachFloor1, eSetValueWithOverwrite);
-    }
-    vTaskDelay(pdMS_TO_TICKS(20));
-  }
-}
-
-void vPollingFloorSensor2(void *pvParams) // first floor sensor
-{
-  uint8_t floorSensor2_counter = 0;
-  const uint8_t STABLE_THRESHOLD = 20;
-
-  for (;;)
-  {
-    bool raw_floorSensor2 = (digitalRead(floorSensor2) == LOW);
-    if (raw_floorSensor2)
-    {
-      if (floorSensor2_counter < STABLE_THRESHOLD)
-        floorSensor2_counter++;
-    }
-    else
-    {
-      floorSensor2_counter = 0;
-    }
-
-    bool isAtFloor2 = (floorSensor2_counter >= STABLE_THRESHOLD);
-
-    if (isAtFloor2 == true)
-    {
-      xTaskNotify(xOchestratorHandle, reachFloor2, eSetValueWithOverwrite);
-    }
-    vTaskDelay(pdMS_TO_TICKS(20));
-  }
-}
-
-void vPollingNoPower(void *pvParams)
-{
-  for (;;)
-  {
-    uint8_t noPower_counter = 0;
-    const uint8_t STABLE_THRESHOLD = 20;
+    userCommand_t userCommand; // target, type, from
+    static unsigned long lastTimeCmd1 = 0;
+    static unsigned long lastTimeCmd2 = 0;
+    const unsigned long DEBOUNCE_DELAY = 3000;
 
     for (;;)
     {
-      bool raw_noPower = (digitalRead(NoPower) == LOW);
-      if (raw_noPower)
+      int cmd = 0;
+      unsigned long now = millis();
+
+      if (RF.available())
       {
-        if (noPower_counter < STABLE_THRESHOLD)
-          noPower_counter++;
-      }
-      else
-      {
-        noPower_counter = 0;
+        cmd = RF.getReceivedValue();
+        RF.resetAvailable();
       }
 
-      bool isNoPower = (noPower_counter >= STABLE_THRESHOLD);
-
-      if (isNoPower == true)
+      switch (cmd)
       {
-        xTaskNotify(xOchestratorHandle, noPowerLanding, eSetValueWithOverwrite);
+      case toFloor1:
+        if (now - lastTimeCmd1 > DEBOUNCE_DELAY)
+        {
+          lastTimeCmd1 = now;
+
+          // if (elevator.pos == 0)
+          // {
+          //   POS = 1;
+          // }
+
+          Serial.println("received toFloor1 cmd");
+          if (elevator.state == STATE_IDLE)
+            userCommand.target = 1;
+          userCommand.type = moveToFloor;
+          userCommand.from = FROM_RF;
+          xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+        }
+        else
+        {
+          Serial.println("toFloor1 Ignored (Debounce 5s)");
+        }
+        break;
+
+      case toFloor2:
+        if (now - lastTimeCmd2 > DEBOUNCE_DELAY)
+        {
+          lastTimeCmd2 = now;
+
+          Serial.println("received toFloor2 cmd");
+          if (elevator.state == STATE_IDLE)
+            userCommand.target = 2;
+          userCommand.type = moveToFloor;
+          userCommand.from = FROM_RF;
+          xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+        }
+        else
+        {
+          Serial.println("toFloor2 Ignored (Debounce 5s)");
+        }
+        break;
+
+        // case POWER_CUT:
+        //   Serial.println("received POWER CUT! cmd");
+        //   strcpy(publish_status.cmd, "POWER_CUT!");
+        //   digitalWrite(R_POWER_CUT, LOW);
+        //   xTimerStart(xPowerCutTimer, 0);
+        //   break;
+
+      case STOP:
+        Serial.println("received STOP cmd");
+        if (elevator.state == STATE_RUNNING)
+        {
+          userCommand.target = 0;
+          userCommand.type = userStop;
+          userCommand.from = FROM_RF;
+          xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+          lastTimeCmd1 = 0;
+          lastTimeCmd2 = 0;
+        }
+        break;
+
       }
-      vTaskDelay(pdMS_TO_TICKS(20));
+      vTaskDelay(pdMS_TO_TICKS(50));
     }
   }
-}
 
-// safety threads
-void vSafetySling(void *pvParams)
-{
-  for (;;)
-  {
-    vTaskDelay(10);
-  }
-}
-
-void vEmergeStop(void *pvParams)
-{
-  for (;;)
-  {
-    vTaskDelay(10);
-  }
-}
-
-void vNoPowerLanding(void *pvParams)
-{
-  for (;;)
-  {
-    vTaskDelay(10);
-  }
-}
-
-void vPollingTimeout(void *pvParams)
-{
-  for (;;)
-  {
-    vTaskDelay(10);
-  }
-}
-
-void vClearCommand(void *pvParams)
-{
-  for (;;)
-  {
-    vTaskDelay(10);
-  }
-}
-
-// other threads
-
-void vReconnectTask(void *pvParams)
-{
-  for (;;)
-  {
-    if (WiFi.status() == WL_CONNECTED)
+    // timer callbacks
+    void vStartRunning(TimerHandle_t xTimer)
     {
-      // Protect Check/Connect with Mutex
-      if (xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE)
+      updateElevator(&elevator, (update_status_t){
+                                    .set = {.state = true},
+                                    .state = STATE_RUNNING});
+    }
+    // polling threads
+
+    void vPollingModbus(void *pvParams)
+    {
+      uint8_t INVERTER_ID = 1;
+      uint8_t CABIN_ID = 2;
+      uint8_t HALL_ID = 3;
+      uint8_t VSG_ID = 4;
+
+      uint16_t FIRST_REG_INVERTER = 28672;
+      uint16_t FIRST_REG_CABIN = 0;
+      uint16_t FIRST_REG_HALL = 0;
+      uint16_t FIRST_REG_VSG = 0;
+
+      uint16_t NUM_READ_INVERTER = 19;
+      uint16_t NUM_READ_CABIN = 16;
+      uint16_t NUM_READ_HALL = 16;
+      uint16_t NUM_READ_VSG = 16;
+
+      uint16_t pollingData[5][32];
+
+      for (;;)
       {
-        if (!mqttClient.connected())
+        uint32_t result;
+        switch (currentStation)
         {
-          Serial.print("MQTT connecting...");
+        case INVERTER_STA:
+          readDataFrom(INVERTER_ID, FIRST_REG_INVERTER, NUM_READ_INVERTER, pollingData[INVERTER_ID]);
 
-          String clientId = "ESP32-" + String(random(0xffff), HEX); // Unique ID
-
-          if (mqttClient.connect(clientId.c_str()))
+          if (pollingData[INVERTER_ID][7] == 992)
           {
-            Serial.println("connected");
-            // Re-subscribe here if needed
+            xTaskNotify(xOchestratorHandle, clearCommand, eSetValueWithOverwrite);
+          }
+          else if (pollingData[INVERTER_ID][6] > TORQUE_RATED)
+          {
+            xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
+          }
+          currentStation = CABIN_STA;
+          break;
+
+        case CABIN_STA:
+          readDataFrom(CABIN_ID, FIRST_REG_CABIN, NUM_READ_CABIN, pollingData[CABIN_ID]);
+          if (pollingData[CABIN_ID][0] == 1)
+          {
+            xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
+          }
+          else if (pollingData[CABIN_ID][1] == 1)
+          {
+            xTaskNotify(xOchestratorHandle, safetySling, eSetValueWithOverwrite);
+          }
+
+          currentStation = HALL_STA;
+          break;
+
+        case HALL_STA:
+          readDataFrom(HALL_ID, FIRST_REG_HALL, NUM_READ_HALL, pollingData[HALL_ID]);
+          if (pollingData[HALL_ID][0] == 1 || pollingData[HALL_ID][1] == 1)
+          {
+            xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
+          }
+          currentStation = VSG_STA;
+          break;
+
+        case VSG_STA:
+          readDataFrom(VSG_ID, FIRST_REG_VSG, NUM_READ_VSG, pollingData[VSG_ID]);
+
+          currentStation = INVERTER_STA;
+          break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+      }
+    }
+
+    void vPollingFloorSensor1(void *pvParams) // first floor sensor
+    {
+      uint8_t floorSensor1_counter = 0;
+      const uint8_t STABLE_THRESHOLD = 20;
+
+      for (;;)
+      {
+        bool raw_floorSensor1 = (digitalRead(floorSensor1) == LOW);
+        if (raw_floorSensor1)
+        {
+          if (floorSensor1_counter < STABLE_THRESHOLD)
+            floorSensor1_counter++;
+        }
+        else
+        {
+          floorSensor1_counter = 0;
+        }
+
+        bool isAtFloor1 = (floorSensor1_counter >= STABLE_THRESHOLD);
+
+        if (isAtFloor1 == true)
+        {
+          xTaskNotify(xOchestratorHandle, reachFloor1, eSetValueWithOverwrite);
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+      }
+    }
+
+    void vPollingFloorSensor2(void *pvParams) // first floor sensor
+    {
+      uint8_t floorSensor2_counter = 0;
+      const uint8_t STABLE_THRESHOLD = 20;
+
+      for (;;)
+      {
+        bool raw_floorSensor2 = (digitalRead(floorSensor2) == LOW);
+        if (raw_floorSensor2)
+        {
+          if (floorSensor2_counter < STABLE_THRESHOLD)
+            floorSensor2_counter++;
+        }
+        else
+        {
+          floorSensor2_counter = 0;
+        }
+
+        bool isAtFloor2 = (floorSensor2_counter >= STABLE_THRESHOLD);
+
+        if (isAtFloor2 == true)
+        {
+          xTaskNotify(xOchestratorHandle, reachFloor2, eSetValueWithOverwrite);
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+      }
+    }
+
+    void vPollingNoPower(void *pvParams)
+    {
+      for (;;)
+      {
+        uint8_t noPower_counter = 0;
+        const uint8_t STABLE_THRESHOLD = 20;
+
+        for (;;)
+        {
+          bool raw_noPower = (digitalRead(NoPower) == LOW);
+          if (raw_noPower)
+          {
+            if (noPower_counter < STABLE_THRESHOLD)
+              noPower_counter++;
           }
           else
           {
-            Serial.print("failed, rc=");
-            Serial.print(mqttClient.state());
+            noPower_counter = 0;
           }
-        }
 
-        // IMPORTANT: loop() must be called frequently to maintain connection
-        if (mqttClient.connected())
-        {
-          mqttClient.loop();
-        }
+          bool isNoPower = (noPower_counter >= STABLE_THRESHOLD);
 
-        xSemaphoreGive(mqttMutex);
+          if (isNoPower == true)
+          {
+            xTaskNotify(xOchestratorHandle, noPowerLanding, eSetValueWithOverwrite);
+          }
+          vTaskDelay(pdMS_TO_TICKS(20));
+        }
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(100)); // Check every 100ms
-  }
-}
 
-void vPublishTask(void *pvParams)
-{
-  for (;;)
-  {
-    // if (xSemaphoreTake(hasChangedMutex, portMAX_DELAY) == pdTRUE)
-    // {
-    //   if (hasChanged == true)
-    //   {
+    // safety threads
+    void vSafetySling(void *pvParams)
+    {
+      for (;;)
+      {
+        vTaskDelay(10);
+      }
+    }
 
-    //     String status_payload = statusToJson_ELE(publish_status);
+    void vEmergeStop(void *pvParams)
+    {
+      for (;;)
+      {
+        vTaskDelay(10);
+      }
+    }
 
-    //     snprintf(
-    //         mqtt_topic,
-    //         sizeof(mqtt_topic),
-    //         "%s%s%s%s",
-    //         KIT_topic,
-    //         UT_case,
-    //         system_status,
-    //         elevator_status);
+    void vNoPowerLanding(void *pvParams)
+    {
+      for (;;)
+      {
+        vTaskDelay(10);
+      }
+    }
 
-    //     publishMqtt(mqtt_topic, status_payload.c_str());
-    //     hasChanged = false;
-    //   }
-    //   xSemaphoreGive(hasChangedMutex);
-    // }
-    vTaskDelay(pdMS_TO_TICKS(20));
-  }
-}
+    void vPollingTimeout(void *pvParams)
+    {
+      for (;;)
+      {
+        vTaskDelay(10);
+      }
+    }
 
-void vStatusLogger(void *pvParams)
-{
-  int lastPOS = -1;
-  bool lastBtw = false;
+    void vClearCommand(void *pvParams)
+    {
+      for (;;)
+      {
+        vTaskDelay(10);
+      }
+    }
 
-  for (;;)
-  {
-    // if (POS != lastPOS || btwFloor != lastBtw)
-    // // if(POS != lastPOS)
-    // {
+    // other threads
 
-    //   saveStatus();
+    void vReconnectTask(void *pvParams)
+    {
+      for (;;)
+      {
+        if (WiFi.status() == WL_CONNECTED)
+        {
+          // Protect Check/Connect with Mutex
+          if (xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE)
+          {
+            if (!mqttClient.connected())
+            {
+              Serial.print("MQTT connecting...");
 
-    //   lastPOS = POS;
-    //   // lastBtw = btwFloor;
-    // }
-    vTaskDelay(1000);
-  }
-}
+              String clientId = "ESP32-" + String(random(0xffff), HEX); // Unique ID
 
-void vUpdatePage(void *pvParams)
-{
-  static char jsonBuf[256];
+              if (mqttClient.connect(clientId.c_str()))
+              {
+                Serial.println("connected");
+                // Re-subscribe here if needed
+              }
+              else
+              {
+                Serial.print("failed, rc=");
+                Serial.print(mqttClient.state());
+              }
+            }
 
-  for (;;)
-  {
-    m_websocketserver.loop();
+            // IMPORTANT: loop() must be called frequently to maintain connection
+            if (mqttClient.connected())
+            {
+              mqttClient.loop();
+            }
 
-    // uint8_t pos;
-    // status_t statusCopy;
+            xSemaphoreGive(mqttMutex);
+          }
+        }
+        vTaskDelay(pdMS_TO_TICKS(100)); // Check every 100ms
+      }
+    }
 
-    // pos = POS;
+    void vPublishTask(void *pvParams)
+    {
+      for (;;)
+      {
+        // if (xSemaphoreTake(hasChangedMutex, portMAX_DELAY) == pdTRUE)
+        // {
+        //   if (hasChanged == true)
+        //   {
 
-    // if (xSemaphoreTake(hasChangedMutex, pdMS_TO_TICKS(5)) == pdTRUE)
-    // {
-    //   statusCopy = publish_status;
-    //   xSemaphoreGive(hasChangedMutex);
-    // }
-    // else
-    // {
-    //   vTaskDelay(pdMS_TO_TICKS(100));
-    //   continue;
-    // }
+        //     String status_payload = statusToJson_ELE(publish_status);
 
-    // snprintf(
-    //     jsonBuf,
-    //     sizeof(jsonBuf),
-    //     "{\"floorValue\":%d,"
-    //     "\"Up\":%s,"
-    //     "\"Down\":%s,"
-    //     "\"BtwFloor\":%s,"
-    //     "\"Moving\":%s,"
-    //     "\"TargetFloor\":%d,"
-    //     "\"Mode\":\"%s\"}",
-    //     pos,
-    //     (statusCopy.dir == UP) ? "true" : "false",
-    //     (statusCopy.dir == DOWN) ? "true" : "false",
-    //     statusCopy.btwFloor ? "true" : "false",
-    //     (statusCopy.state == MOVING) ? "true" : "false",
-    //     statusCopy.targetFloor,
-    //     (statusCopy.mode == NORMAL) ? "NORMAL" : "EMERGENCY");
+        //     snprintf(
+        //         mqtt_topic,
+        //         sizeof(mqtt_topic),
+        //         "%s%s%s%s",
+        //         KIT_topic,
+        //         UT_case,
+        //         system_status,
+        //         elevator_status);
 
-    // m_websocketserver.broadcastTXT(jsonBuf, strlen(jsonBuf));
+        //     publishMqtt(mqtt_topic, status_payload.c_str());
+        //     hasChanged = false;
+        //   }
+        //   xSemaphoreGive(hasChangedMutex);
+        // }
+        vTaskDelay(pdMS_TO_TICKS(20));
+      }
+    }
 
-    vTaskDelay(pdMS_TO_TICKS(10));
-  }
-}
+    void vStatusLogger(void *pvParams)
+    {
+      int lastPOS = -1;
+      bool lastBtw = false;
 
-void setup()
-{
-  Serial.begin(115200);
-  Serial1.begin(38400, SERIAL_8E1, PIN_RX, PIN_TX);
+      for (;;)
+      {
+        // if (POS != lastPOS || btwFloor != lastBtw)
+        // // if(POS != lastPOS)
+        // {
 
-  while (!Serial)
-    ;
+        //   saveStatus();
 
-  Serial.println("Welcome to Ximplex LuckD");
-  delay(500);
+        //   lastPOS = POS;
+        //   // lastBtw = btwFloor;
+        // }
+        vTaskDelay(1000);
+      }
+    }
 
-  // ############################### SPIFFS STARTUP #######################################
-  if (!SPIFFS.begin(true))
-  {
-    Serial.println("An Error has occurred while mounting SPIFFS");
-    return;
-  }
+    void vUpdatePage(void *pvParams)
+    {
+      static char jsonBuf[256];
 
-  // loadStatus();
-  delay(500);
+      for (;;)
+      {
+        m_websocketserver.loop();
 
-  RF.enableReceive(RFReceiver);
-  delay(500);
+        // uint8_t pos;
+        // status_t statusCopy;
 
-  bool m_autoconnected_attempt_succeeded = false;
-  m_autoconnected_attempt_succeeded = connectAttempt("", ""); // uses SSID/PWD stored in ESP32 secret memory.....
-  if (!m_autoconnected_attempt_succeeded)
-  {
-    // try SSID/PWD from file...
-    Serial.println("Failed to connect.");
-    String m_filenametopass = "/credentials.JSON";
-    m_autoconnected_attempt_succeeded = readSSIDPWDfile(m_filenametopass);
-  }
-  if (!m_autoconnected_attempt_succeeded)
-  {
-    setUpAPService();
-    runWifiPortal();
-  }
+        // pos = POS;
 
-  MDNS.begin("ximplex_ws");
+        // if (xSemaphoreTake(hasChangedMutex, pdMS_TO_TICKS(5)) == pdTRUE)
+        // {
+        //   statusCopy = publish_status;
+        //   xSemaphoreGive(hasChangedMutex);
+        // }
+        // else
+        // {
+        //   vTaskDelay(pdMS_TO_TICKS(100));
+        //   continue;
+        // }
 
-  server.reset(); // try putting this in setup
-  configureserver();
+        // snprintf(
+        //     jsonBuf,
+        //     sizeof(jsonBuf),
+        //     "{\"floorValue\":%d,"
+        //     "\"Up\":%s,"
+        //     "\"Down\":%s,"
+        //     "\"BtwFloor\":%s,"
+        //     "\"Moving\":%s,"
+        //     "\"TargetFloor\":%d,"
+        //     "\"Mode\":\"%s\"}",
+        //     pos,
+        //     (statusCopy.dir == UP) ? "true" : "false",
+        //     (statusCopy.dir == DOWN) ? "true" : "false",
+        //     statusCopy.btwFloor ? "true" : "false",
+        //     (statusCopy.state == MOVING) ? "true" : "false",
+        //     statusCopy.targetFloor,
+        //     (statusCopy.mode == NORMAL) ? "NORMAL" : "EMERGENCY");
 
-  m_websocketserver.begin();
-  m_websocketserver.onEvent(onWebSocketEvent); // Start WebSocket server and assign callback
+        // m_websocketserver.broadcastTXT(jsonBuf, strlen(jsonBuf));
 
-  delay(500);
+        vTaskDelay(pdMS_TO_TICKS(10));
+      }
+    }
 
-  // wifiClient.setInsecure();
-  Serial.println(WiFi.localIP());
-  setupMQTT();
+    void setup()
+    {
+      Serial.begin(115200);
+      Serial1.begin(38400, SERIAL_8E1, PIN_RX, PIN_TX);
 
-  pinMode(WIFI_READY, OUTPUT);
-  pinMode(R_UP, OUTPUT);
-  pinMode(R_DW, OUTPUT);
-  pinMode(R_POWER_CUT, OUTPUT);
-  pinMode(BRK, OUTPUT);
+      while (!Serial)
+        ;
 
-  pinMode(floorSensor1, INPUT); // normal pull-up by using external resistor
-  pinMode(floorSensor2, INPUT); // normal pull-up by using external resistor
-  // attachInterrupt(floorSensor1, ISR_LowerLim, FALLING);
-  // attachInterrupt(floorSensor2, ISR_UpperLim, FALLING);
+      Serial.println("Welcome to Ximplex LuckD");
+      delay(500);
 
-  pinMode(NoPower, INPUT); // normal pull-up by using external resistor
-  // attachInterrupt(NP, ISR_Landing, FALLING);
+      // ############################### SPIFFS STARTUP #######################################
+      if (!SPIFFS.begin(true))
+      {
+        Serial.println("An Error has occurred while mounting SPIFFS");
+        return;
+      }
 
-  // pinMode(CS, OUTPUT);
-  // digitalWrite(CS, HIGH); // rf always waked up
+      // loadStatus();
+      delay(500);
 
-  // pinMode(RST_SYS, INPUT_PULLUP);
-  // attachInterrupt(RST_SYS, ISR_ResetSystem, FALLING);
+      RF.enableReceive(RFReceiver);
+      delay(500);
 
-  // digitalWrite(R_POWER_CUT, HIGH);
-  M_STP;
-  BRK_ON();
+      bool m_autoconnected_attempt_succeeded = false;
+      m_autoconnected_attempt_succeeded = connectAttempt("", ""); // uses SSID/PWD stored in ESP32 secret memory.....
+      if (!m_autoconnected_attempt_succeeded)
+      {
+        // try SSID/PWD from file...
+        Serial.println("Failed to connect.");
+        String m_filenametopass = "/credentials.JSON";
+        m_autoconnected_attempt_succeeded = readSSIDPWDfile(m_filenametopass);
+      }
+      if (!m_autoconnected_attempt_succeeded)
+      {
+        setUpAPService();
+        runWifiPortal();
+      }
 
-  // xSemTransit = xSemaphoreCreateBinary();
-  // xSemDoneTransit = xSemaphoreCreateBinary();
-  // xSemLanding = xSemaphoreCreateBinary();
+      MDNS.begin("ximplex_ws");
 
-  // xTransitMutex = xSemaphoreCreateMutex();
-  mqttMutex = xSemaphoreCreateMutex();
-  // hasChangedMutex = xSemaphoreCreateMutex();
+      server.reset(); // try putting this in setup
+      configureserver();
 
-  // xQueueGetDirection = xQueueCreate(1, sizeof(uint8_t));
+      m_websocketserver.begin();
+      m_websocketserver.onEvent(onWebSocketEvent); // Start WebSocket server and assign callback
 
-  xStartRunningTimer = xTimerCreate("startRunning", WAIT_TO_RUNNING_MS, pdFALSE, NULL, vStartRunning);
-  // xStopTransitTimer = xTimerCreate("StopTransitTimer", 100, pdFALSE, NULL, vStopTransit);
-  // xPowerCutTimer = xTimerCreate("PowerCutTimer", POWER_CUT_MS, pdFALSE, NULL, vCutPower);
-  // xDisbrakeTimer = xTimerCreate("DisbrakeTimer", BRAKE_MS, pdFALSE, NULL, vDisbrake);
+      delay(500);
 
-  xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 3, NULL); // blocked
-  xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, NULL);     // blocked
-  // xTaskCreate(vReceive, "Receive", 1024, NULL, 2, NULL);
-  // xTaskCreate(vGetDirection, "GetDirection", 1024, NULL, 3, NULL);  // blocked
-  // xTaskCreate(vTransit, "Transit", 1024, NULL, 3, NULL);            // blocked
-  // xTaskCreate(vLanding, "Landing", 2048, NULL, 4, &xLandingHandle); // blocked
-  xTaskCreate(vStatusLogger, "StatusLogger", 4096, NULL, 2, NULL); // blocked
-  // xTaskCreate(vPublishInverterTask, "PublishInverter", 4096, NULL, 3, NULL);
-  // xTaskCreate(vPollingTask, "Polling", 4096, NULL, 3, NULL);   // blocked
-  xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 3, NULL); // blocked
+      // wifiClient.setInsecure();
+      Serial.println(WiFi.localIP());
+      setupMQTT();
 
-  xTaskCreate(vOchestrator, "UpdatePage", 4096, NULL, 3, &xOchestratorHandle);                 // blocked
-  xTaskCreate(vRFReceiver, "UpdatePage", 4096, NULL, 3, &xRFReceiverHandleHandle);             // blocked
-  xTaskCreate(vPollingModbus, "UpdatePage", 4096, NULL, 3, &xPollingModbusHandle);             // blocked
-  xTaskCreate(vPollingFloorSensor1, "UpdatePage", 4096, NULL, 3, &xPollingFloorSensor1Handle); // blocked
-  xTaskCreate(vPollingFloorSensor2, "UpdatePage", 4096, NULL, 3, &xPollingFloorSensor2Handle); // blocked
-  xTaskCreate(vPollingNoPower, "UpdatePage", 4096, NULL, 3, &xPollingNoPowerHandle);           // blocked
-  xTaskCreate(vSafetySling, "UpdatePage", 4096, NULL, 3, &xSafetySlingHandle);                 // blocked
-  xTaskCreate(vEmergeStop, "UpdatePage", 4096, NULL, 3, &xEmergeStopHandle);                   // blocked
-  xTaskCreate(vNoPowerLanding, "UpdatePage", 4096, NULL, 3, &xNoPowerLandingHandle);           // blocked
-  xTaskCreate(vPollingTimeout, "UpdatePage", 4096, NULL, 3, &xPollingTimeoutHandle);           // blocked
-  xTaskCreate(vClearCommand, "UpdatePage", 4096, NULL, 3, &xClearCommandHandle);               // blocked
+      pinMode(WIFI_READY, OUTPUT);
+      pinMode(R_UP, OUTPUT);
+      pinMode(R_DW, OUTPUT);
+      pinMode(R_POWER_CUT, OUTPUT);
+      pinMode(BRK, OUTPUT);
 
-  delay(500);
+      pinMode(floorSensor1, INPUT); // normal pull-up by using external resistor
+      pinMode(floorSensor2, INPUT); // normal pull-up by using external resistor
+      // attachInterrupt(floorSensor1, ISR_LowerLim, FALLING);
+      // attachInterrupt(floorSensor2, ISR_UpperLim, FALLING);
 
-  Serial.print("Heap free memory (in bytes)= ");
-  Serial.println(ESP.getFreeHeap());
-  Serial.println(F("Setup complete."));
-  delay(500);
-}
+      pinMode(NoPower, INPUT); // normal pull-up by using external resistor
+      // attachInterrupt(NP, ISR_Landing, FALLING);
 
-void loop()
-{
-}
+      // pinMode(CS, OUTPUT);
+      // digitalWrite(CS, HIGH); // rf always waked up
+
+      // pinMode(RST_SYS, INPUT_PULLUP);
+      // attachInterrupt(RST_SYS, ISR_ResetSystem, FALLING);
+
+      // digitalWrite(R_POWER_CUT, HIGH);
+      M_STP;
+      BRK_ON();
+
+      // xSemTransit = xSemaphoreCreateBinary();
+      // xSemDoneTransit = xSemaphoreCreateBinary();
+      // xSemLanding = xSemaphoreCreateBinary();
+
+      // xTransitMutex = xSemaphoreCreateMutex();
+      mqttMutex = xSemaphoreCreateMutex();
+      // hasChangedMutex = xSemaphoreCreateMutex();
+
+      // xQueueGetDirection = xQueueCreate(1, sizeof(uint8_t));
+
+      xStartRunningTimer = xTimerCreate("startRunning", WAIT_TO_RUNNING_MS, pdFALSE, NULL, vStartRunning);
+      // xStopTransitTimer = xTimerCreate("StopTransitTimer", 100, pdFALSE, NULL, vStopTransit);
+      // xPowerCutTimer = xTimerCreate("PowerCutTimer", POWER_CUT_MS, pdFALSE, NULL, vCutPower);
+      // xDisbrakeTimer = xTimerCreate("DisbrakeTimer", BRAKE_MS, pdFALSE, NULL, vDisbrake);
+
+      xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 3, NULL); // blocked
+      xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, NULL);     // blocked
+      // xTaskCreate(vReceive, "Receive", 1024, NULL, 2, NULL);
+      // xTaskCreate(vGetDirection, "GetDirection", 1024, NULL, 3, NULL);  // blocked
+      // xTaskCreate(vTransit, "Transit", 1024, NULL, 3, NULL);            // blocked
+      // xTaskCreate(vLanding, "Landing", 2048, NULL, 4, &xLandingHandle); // blocked
+      xTaskCreate(vStatusLogger, "StatusLogger", 4096, NULL, 2, NULL); // blocked
+      // xTaskCreate(vPublishInverterTask, "PublishInverter", 4096, NULL, 3, NULL);
+      // xTaskCreate(vPollingTask, "Polling", 4096, NULL, 3, NULL);   // blocked
+      xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 3, NULL); // blocked
+
+      xTaskCreate(vOchestrator, "UpdatePage", 4096, NULL, 3, &xOchestratorHandle);                 // blocked
+      xTaskCreate(vRFReceiver, "UpdatePage", 4096, NULL, 3, &xRFReceiverHandleHandle);             // blocked
+      xTaskCreate(vPollingModbus, "UpdatePage", 4096, NULL, 3, &xPollingModbusHandle);             // blocked
+      xTaskCreate(vPollingFloorSensor1, "UpdatePage", 4096, NULL, 3, &xPollingFloorSensor1Handle); // blocked
+      xTaskCreate(vPollingFloorSensor2, "UpdatePage", 4096, NULL, 3, &xPollingFloorSensor2Handle); // blocked
+      xTaskCreate(vPollingNoPower, "UpdatePage", 4096, NULL, 3, &xPollingNoPowerHandle);           // blocked
+      xTaskCreate(vSafetySling, "UpdatePage", 4096, NULL, 3, &xSafetySlingHandle);                 // blocked
+      xTaskCreate(vEmergeStop, "UpdatePage", 4096, NULL, 3, &xEmergeStopHandle);                   // blocked
+      xTaskCreate(vNoPowerLanding, "UpdatePage", 4096, NULL, 3, &xNoPowerLandingHandle);           // blocked
+      xTaskCreate(vPollingTimeout, "UpdatePage", 4096, NULL, 3, &xPollingTimeoutHandle);           // blocked
+      xTaskCreate(vClearCommand, "UpdatePage", 4096, NULL, 3, &xClearCommandHandle);               // blocked
+
+      delay(500);
+
+      Serial.print("Heap free memory (in bytes)= ");
+      Serial.println(ESP.getFreeHeap());
+      Serial.println(F("Setup complete."));
+      delay(500);
+    }
+
+    void loop()
+    {
+    }
