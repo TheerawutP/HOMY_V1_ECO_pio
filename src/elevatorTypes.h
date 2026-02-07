@@ -45,16 +45,27 @@ typedef struct
   bool btwFloor;
 } status_t;
 
-typedef struct
-{
-  uint8_t *pos;
-  state_t *state;
-  direction_t *dir;
-  direction_t *lastDir;
-  uint8_t *target;
-  uint8_t *lastTarget;
-  bool *isBrake;
-  bool *btwFloor;
+
+typedef struct {
+    struct {
+        bool pos : 1;
+        bool state : 1;
+        bool dir : 1;
+        bool lastDir : 1;
+        bool target : 1;
+        bool lastTarget : 1;
+        bool isBrake : 1;
+        bool btwFloor : 1;
+    } set; 
+
+    uint8_t pos;
+    state_t state;
+    direction_t dir;
+    direction_t lastDir;
+    uint8_t target;
+    uint8_t lastTarget;
+    bool isBrake;
+    bool btwFloor;
 } update_status_t;
 
 enum elevatorEvent_t

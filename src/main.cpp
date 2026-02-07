@@ -21,13 +21,13 @@
 #define WIFI_READY 13
 #define RFReceiver 23
 #define floorSensor1 32
-// #define floorSensor2 33
+#define floorSensor2 33
 #define R_UP 19        // Relay UP
 #define R_DW 18        // Relay DOWN
 #define R_POWER_CUT 15 // Relay 4
 #define BRK 5          // brake
 #define NoPower 25
-// #define CS 21 //ต่อ 3.3v ไปเลย
+// #define CS 21 //direct to 3.3v
 // #define RST_SYS 4
 // #define MB_RX 26
 // #define MB_TX 27
@@ -67,7 +67,8 @@ QueueHandle_t xQueueCommand;
 TaskHandle_t xOchestratorHandle;
 TaskHandle_t xRFReceiverHandleHandle;
 TaskHandle_t xPollingModbusHandle;
-TaskHandle_t xPollingLowerLimHandle;
+TaskHandle_t xPollingFloorSensor1Handle;
+TaskHandle_t xPollingFloorSensor2Handle;
 TaskHandle_t xPollingNoPowerHandle;
 TaskHandle_t xSafetySlingHandle;
 TaskHandle_t xEmergeStopHandle;
@@ -95,12 +96,12 @@ status_t elevator = {
     .target = 1,
     .lastTarget = 1,
     .isBrake = true,
-    .btwFloor = false
-};
+    .btwFloor = false};
 
 modbusStation_t currentStation = INVERTER_STA;
 
 // other helpers
+
 inline void ROTATE(direction_t dir)
 {
   if (dir == DIR_UP)
@@ -997,6 +998,7 @@ void configureserver()
 }
 
 // main helpers
+
 void updateElevator(status_t *dest, update_status_t up)
 {
   if (dest == NULL)
@@ -1004,22 +1006,22 @@ void updateElevator(status_t *dest, update_status_t up)
 
   // taskENTER_CRITICAL();
 
-  if (up.pos)
-    dest->pos = *up.pos;
-  if (up.state)
-    dest->state = *up.state;
-  if (up.dir)
-    dest->dir = *up.dir;
-  if (up.lastDir)
-    dest->lastDir = *up.lastDir;
-  if (up.target)
-    dest->target = *up.target;
-  if (up.lastTarget)
-    dest->lastTarget = *up.lastTarget;
-  if (up.isBrake)
-    dest->isBrake = *up.isBrake;
-  if (up.btwFloor)
-    dest->btwFloor = *up.btwFloor;
+  if (up.set.pos)
+    dest->pos = up.pos;
+  if (up.set.state)
+    dest->state = up.state;
+  if (up.set.dir)
+    dest->dir = up.dir;
+  if (up.set.lastDir)
+    dest->lastDir = up.lastDir;
+  if (up.set.target)
+    dest->target = up.target;
+  if (up.set.lastTarget)
+    dest->lastTarget = up.lastTarget;
+  if (up.set.isBrake)
+    dest->isBrake = up.isBrake;
+  if (up.set.btwFloor)
+    dest->btwFloor = up.btwFloor;
 
   // taskEXIT_CRITICAL();
 }
@@ -1049,9 +1051,15 @@ void eventListener(uint32_t ulNotificationValue, elevatorEvent_t *emg)
     break;
 
   case reachFloor1:
+    updateElevator(&elevator, (update_status_t){
+                                  .set = {.pos = true},
+                                  .pos = 1});
     break;
 
   case reachFloor2:
+    updateElevator(&elevator, (update_status_t){
+                                  .set = {.pos = true},
+                                  .pos = 2});
     break;
 
   default:
@@ -1065,15 +1073,19 @@ void getDir(uint8_t target, transitCommand_t *cmd)
   {
     direction_t newDir = (target > elevator.pos) ? DIR_UP : DIR_DOWN;
     uint8_t newTarget = target;
-    state_t nextState = STATE_PENDING;
 
     cmd->dir = newDir;
     cmd->target = newTarget;
 
     updateElevator(&elevator, (update_status_t){
-                                  .state = &nextState,
-                                  .dir = &newDir,
-                                  .lastTarget = &newTarget});
+                                  .set = {
+                                      .state = true,
+                                      .dir = true,
+                                      .lastTarget = true},
+
+                                  .state = STATE_PENDING,
+                                  .dir = newDir,
+                                  .lastTarget = newTarget});
   }
   else
   {
@@ -1081,7 +1093,6 @@ void getDir(uint8_t target, transitCommand_t *cmd)
     {
       direction_t newDir = DIR_NONE;
       uint8_t newTarget = target;
-      state_t nextState = STATE_PENDING;
 
       if (elevator.lastTarget > elevator.pos)
         newDir = DIR_DOWN;
@@ -1092,9 +1103,14 @@ void getDir(uint8_t target, transitCommand_t *cmd)
       cmd->target = newTarget;
 
       updateElevator(&elevator, (update_status_t){
-                                    .state = &nextState,
-                                    .dir = &newDir,
-                                    .target = &newTarget});
+                                    .set = {
+                                        .state = true,
+                                        .dir = true,
+                                        .lastTarget = true},
+
+                                    .state = STATE_PENDING,
+                                    .dir = newDir,
+                                    .lastTarget = newTarget});
     }
     else
     {
@@ -1106,21 +1122,19 @@ void getDir(uint8_t target, transitCommand_t *cmd)
 void transit(transitCommand_t cmd)
 {
   state_t nextState = STATE_RUNNING;
-  bool btwFloor_buff = true;
   ROTATE(cmd.dir);
   updateElevator(&elevator, (update_status_t){
-                                .state = &nextState,
-                                .btwFloor = &btwFloor_buff
-                            });
+                                .set = {
+                                    .state = true,
+                                    .btwFloor = true},
+
+                                .state = STATE_RUNNING,
+                                .btwFloor = true});
 }
 
 void stopMotion()
 {
   M_STP();
-}
-
-void abortAll()
-{
 }
 
 bool readDataFrom(uint8_t slaveID, uint16_t startAddress, uint8_t numRead, uint16_t *hreg_row)
@@ -1179,6 +1193,7 @@ void emergencyHandler(elevatorEvent_t emergeType)
 }
 
 // central state manager
+
 void vOchestrator(void *pvParameters)
 {
 
@@ -1186,7 +1201,6 @@ void vOchestrator(void *pvParameters)
   userCommand_t userCommand; // cmdType, source of command
   transitCommand_t command;  // dir + target
   elevatorEvent_t evtType;
-  state_t nextState;
 
   for (;;)
   {
@@ -1208,9 +1222,9 @@ void vOchestrator(void *pvParameters)
 
       case stop:
         if (elevator.state == STATE_RUNNING)
-          nextState = STATE_RUNNING;
           updateElevator(&elevator, (update_status_t){
-                                        .state = &nextState});
+                                        .set = {.state = true},
+                                        .state = STATE_RUNNING});
       }
     }
 
@@ -1222,11 +1236,9 @@ void vOchestrator(void *pvParameters)
       break;
 
     case STATE_PENDING:
-      nextState = STATE_RUNNING;
-      vTaskDelay(WAIT_TO_RUNNING_MS);
       updateElevator(&elevator, (update_status_t){
-                                    .state = &nextState,
-                                });
+                                    .set = {.state = true},
+                                    .state = STATE_RUNNING});
 
       break;
 
@@ -1251,6 +1263,7 @@ void vOchestrator(void *pvParameters)
 }
 
 // main threads
+
 void vRFReceiver(void *pvParams)
 {
   for (;;)
@@ -1260,8 +1273,14 @@ void vRFReceiver(void *pvParams)
 }
 
 // timer callbacks
-
+void vStartRunning(xTimer_t timer)
+{
+  updateElevator(&elevator, (update_status_t){
+                                .set = {.state = true},
+                                .state = STATE_RUNNING});
+}
 // polling threads
+
 void vPollingModbus(void *pvParams)
 {
   uint8_t INVERTER_ID = 1;
@@ -1333,7 +1352,7 @@ void vPollingModbus(void *pvParams)
   }
 }
 
-void vPollingLowerLim(void *pvParams) // first floor sensor
+void vPollingFloorSensor1(void *pvParams) // first floor sensor
 {
   uint8_t floorSensor1_counter = 0;
   const uint8_t STABLE_THRESHOLD = 20;
@@ -1356,6 +1375,34 @@ void vPollingLowerLim(void *pvParams) // first floor sensor
     if (isAtFloor1 == true)
     {
       xTaskNotify(xOchestratorHandle, reachFloor1, eSetValueWithOverwrite);
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+void vPollingFloorSensor2(void *pvParams) // first floor sensor
+{
+  uint8_t floorSensor2_counter = 0;
+  const uint8_t STABLE_THRESHOLD = 20;
+
+  for (;;)
+  {
+    bool raw_floorSensor2 = (digitalRead(floorSensor2) == LOW);
+    if (raw_floorSensor2)
+    {
+      if (floorSensor2_counter < STABLE_THRESHOLD)
+        floorSensor2_counter++;
+    }
+    else
+    {
+      floorSensor2_counter = 0;
+    }
+
+    bool isAtFloor2 = (floorSensor2_counter >= STABLE_THRESHOLD);
+
+    if (isAtFloor2 == true)
+    {
+      xTaskNotify(xOchestratorHandle, reachFloor2, eSetValueWithOverwrite);
     }
     vTaskDelay(pdMS_TO_TICKS(20));
   }
@@ -1432,6 +1479,8 @@ void vClearCommand(void *pvParams)
     vTaskDelay(10);
   }
 }
+
+// other threads
 
 void vReconnectTask(void *pvParams)
 {
@@ -1630,7 +1679,7 @@ void setup()
   pinMode(BRK, OUTPUT);
 
   pinMode(floorSensor1, INPUT); // normal pull-up by using external resistor
-  // pinMode(floorSensor2, INPUT); // normal pull-up by using external resistor
+  pinMode(floorSensor2, INPUT); // normal pull-up by using external resistor
   // attachInterrupt(floorSensor1, ISR_LowerLim, FALLING);
   // attachInterrupt(floorSensor2, ISR_UpperLim, FALLING);
 
@@ -1663,7 +1712,7 @@ void setup()
   // xDisbrakeTimer = xTimerCreate("DisbrakeTimer", BRAKE_MS, pdFALSE, NULL, vDisbrake);
 
   xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 3, NULL); // blocked
-  xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, NULL);   // blocked
+  xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, NULL);     // blocked
   // xTaskCreate(vReceive, "Receive", 1024, NULL, 2, NULL);
   // xTaskCreate(vGetDirection, "GetDirection", 1024, NULL, 3, NULL);  // blocked
   // xTaskCreate(vTransit, "Transit", 1024, NULL, 3, NULL);            // blocked
@@ -1673,16 +1722,17 @@ void setup()
   // xTaskCreate(vPollingTask, "Polling", 4096, NULL, 3, NULL);   // blocked
   xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 3, NULL); // blocked
 
-  xTaskCreate(vOchestrator, "UpdatePage", 4096, NULL, 3, &xOchestratorHandle);         // blocked
-  xTaskCreate(vRFReceiver, "UpdatePage", 4096, NULL, 3, &xRFReceiverHandleHandle);     // blocked
-  xTaskCreate(vPollingModbus, "UpdatePage", 4096, NULL, 3, &xPollingModbusHandle);     // blocked
-  xTaskCreate(vPollingLowerLim, "UpdatePage", 4096, NULL, 3, &xPollingLowerLimHandle); // blocked
-  xTaskCreate(vPollingNoPower, "UpdatePage", 4096, NULL, 3, &xPollingNoPowerHandle);   // blocked
-  xTaskCreate(vSafetySling, "UpdatePage", 4096, NULL, 3, &xSafetySlingHandle);         // blocked
-  xTaskCreate(vEmergeStop, "UpdatePage", 4096, NULL, 3, &xEmergeStopHandle);           // blocked
-  xTaskCreate(vNoPowerLanding, "UpdatePage", 4096, NULL, 3, &xNoPowerLandingHandle);   // blocked
-  xTaskCreate(vPollingTimeout, "UpdatePage", 4096, NULL, 3, &xPollingTimeoutHandle);   // blocked
-  xTaskCreate(vClearCommand, "UpdatePage", 4096, NULL, 3, &xClearCommandHandle);       // blocked
+  xTaskCreate(vOchestrator, "UpdatePage", 4096, NULL, 3, &xOchestratorHandle);                 // blocked
+  xTaskCreate(vRFReceiver, "UpdatePage", 4096, NULL, 3, &xRFReceiverHandleHandle);             // blocked
+  xTaskCreate(vPollingModbus, "UpdatePage", 4096, NULL, 3, &xPollingModbusHandle);             // blocked
+  xTaskCreate(vPollingFloorSensor1, "UpdatePage", 4096, NULL, 3, &xPollingFloorSensor1Handle); // blocked
+  xTaskCreate(vPollingFloorSensor2, "UpdatePage", 4096, NULL, 3, &xPollingFloorSensor2Handle); // blocked
+  xTaskCreate(vPollingNoPower, "UpdatePage", 4096, NULL, 3, &xPollingNoPowerHandle);           // blocked
+  xTaskCreate(vSafetySling, "UpdatePage", 4096, NULL, 3, &xSafetySlingHandle);                 // blocked
+  xTaskCreate(vEmergeStop, "UpdatePage", 4096, NULL, 3, &xEmergeStopHandle);                   // blocked
+  xTaskCreate(vNoPowerLanding, "UpdatePage", 4096, NULL, 3, &xNoPowerLandingHandle);           // blocked
+  xTaskCreate(vPollingTimeout, "UpdatePage", 4096, NULL, 3, &xPollingTimeoutHandle);           // blocked
+  xTaskCreate(vClearCommand, "UpdatePage", 4096, NULL, 3, &xClearCommandHandle);               // blocked
 
   delay(500);
 
