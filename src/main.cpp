@@ -1206,7 +1206,10 @@ void vOchestrator(void *pvParameters)
 
   for (;;)
   {
-    if (xTaskNotifyWait(0x00, 0xFFFFFFFF, &ulNotificationValue, (TickType_t)10) == pdPASS)
+
+    ////////////////////////////listen to all event that would happens///////////////////////////////////
+
+    if (xTaskNotifyWait(0x00, 0xFFFFFFFF, &ulNotificationValue, 0) == pdPASS)
     {
       eventListener(ulNotificationValue, &evtType);
 
@@ -1238,7 +1241,8 @@ void vOchestrator(void *pvParameters)
       }
     }
 
-    ////////////handle command////////////////////////////
+    //////////////////////////////////////handle any commands from user////////////////////////////
+
     if (xQueueReceive(xQueueCommand, &userCommand, 0) == pdPASS)
     {
       commandType_t cmd = userCommand.type;
@@ -1260,7 +1264,9 @@ void vOchestrator(void *pvParameters)
         break;
 
       }
-      ////////////handle command////////////////////////////
+    }
+
+      ///////////////////////////////////state of elevator////////////////////////////////////////
 
       switch (elevator.state)
       {
@@ -1294,7 +1300,7 @@ void vOchestrator(void *pvParameters)
       }
 
       vTaskDelay(pdMS_TO_TICKS(10));
-    }
+    
   }
 }
 
@@ -1821,32 +1827,24 @@ void vOchestrator(void *pvParameters)
       // xQueueGetDirection = xQueueCreate(1, sizeof(uint8_t));
 
       xStartRunningTimer = xTimerCreate("startRunning", WAIT_TO_RUNNING_MS, pdFALSE, NULL, vStartRunning);
-      // xStopTransitTimer = xTimerCreate("StopTransitTimer", 100, pdFALSE, NULL, vStopTransit);
-      // xPowerCutTimer = xTimerCreate("PowerCutTimer", POWER_CUT_MS, pdFALSE, NULL, vCutPower);
-      // xDisbrakeTimer = xTimerCreate("DisbrakeTimer", BRAKE_MS, pdFALSE, NULL, vDisbrake);
+   
 
-      xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 3, NULL); // blocked
-      xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, NULL);     // blocked
-      // xTaskCreate(vReceive, "Receive", 1024, NULL, 2, NULL);
-      // xTaskCreate(vGetDirection, "GetDirection", 1024, NULL, 3, NULL);  // blocked
-      // xTaskCreate(vTransit, "Transit", 1024, NULL, 3, NULL);            // blocked
-      // xTaskCreate(vLanding, "Landing", 2048, NULL, 4, &xLandingHandle); // blocked
-      xTaskCreate(vStatusLogger, "StatusLogger", 4096, NULL, 2, NULL); // blocked
-      // xTaskCreate(vPublishInverterTask, "PublishInverter", 4096, NULL, 3, NULL);
-      // xTaskCreate(vPollingTask, "Polling", 4096, NULL, 3, NULL);   // blocked
-      xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 3, NULL); // blocked
+      xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 3, NULL); 
+      xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, NULL);    
+      xTaskCreate(vStatusLogger, "StatusLogger", 2048, NULL, 2, NULL); 
+      xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 3, NULL); 
 
-      xTaskCreate(vOchestrator, "UpdatePage", 4096, NULL, 3, &xOchestratorHandle);                 // blocked
-      xTaskCreate(vRFReceiver, "UpdatePage", 4096, NULL, 3, &xRFReceiverHandleHandle);             // blocked
-      xTaskCreate(vPollingModbus, "UpdatePage", 4096, NULL, 3, &xPollingModbusHandle);             // blocked
-      xTaskCreate(vPollingFloorSensor1, "UpdatePage", 4096, NULL, 3, &xPollingFloorSensor1Handle); // blocked
-      xTaskCreate(vPollingFloorSensor2, "UpdatePage", 4096, NULL, 3, &xPollingFloorSensor2Handle); // blocked
-      xTaskCreate(vPollingNoPower, "UpdatePage", 4096, NULL, 3, &xPollingNoPowerHandle);           // blocked
-      xTaskCreate(vSafetySling, "UpdatePage", 4096, NULL, 3, &xSafetySlingHandle);                 // blocked
-      xTaskCreate(vEmergeStop, "UpdatePage", 4096, NULL, 3, &xEmergeStopHandle);                   // blocked
-      xTaskCreate(vNoPowerLanding, "UpdatePage", 4096, NULL, 3, &xNoPowerLandingHandle);           // blocked
-      xTaskCreate(vPollingTimeout, "UpdatePage", 4096, NULL, 3, &xPollingTimeoutHandle);           // blocked
-      xTaskCreate(vClearCommand, "UpdatePage", 4096, NULL, 3, &xClearCommandHandle);               // blocked
+      xTaskCreate(vOchestrator, "Ochestrator", 4096, NULL, 3, &xOchestratorHandle);                 
+      xTaskCreate(vRFReceiver, "RFReceiver", 3072, NULL, 3, &xRFReceiverHandleHandle);             
+      xTaskCreate(vPollingModbus, "PollingModbus", 3072, NULL, 3, &xPollingModbusHandle);           
+      xTaskCreate(vPollingFloorSensor1, "PollingFloorSensor", 2048, NULL, 3, &xPollingFloorSensor1Handle); 
+      xTaskCreate(vPollingFloorSensor2, "PollingFloorSensor2", 2048, NULL, 3, &xPollingFloorSensor2Handle);
+      xTaskCreate(vPollingNoPower, "PollingNoPower", 2048, NULL, 3, &xPollingNoPowerHandle);          
+      xTaskCreate(vSafetySling, "SafetySling", 1536, NULL, 3, &xSafetySlingHandle);               
+      xTaskCreate(vEmergeStop, "EmergeStop", 1536, NULL, 3, &xEmergeStopHandle);                 
+      xTaskCreate(vNoPowerLanding, "NoPowerLanding", 1536, NULL, 3, &xNoPowerLandingHandle);           
+      xTaskCreate(vPollingTimeout, "PollingTimeout", 1536, NULL, 3, &xPollingTimeoutHandle);          
+      xTaskCreate(vClearCommand, "ClearCommand", 1536, NULL, 3, &xClearCommandHandle);               
 
       delay(500);
 
