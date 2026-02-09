@@ -20,4 +20,4 @@ extern const char* STATUS_FILE;
 void saveStatus();
 void loadStatus();
 
-#endif 
+#endif  

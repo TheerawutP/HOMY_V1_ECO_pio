@@ -21,4 +21,4 @@ void loadStatus() {
   preferences.end();
   
   Serial.printf("Loaded: POS=%d, Btw=%s\n", POS, btwFloor ? "TRUE" : "FALSE");
-} 
+}  

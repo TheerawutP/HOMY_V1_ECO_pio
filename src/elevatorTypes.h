@@ -82,7 +82,7 @@ enum elevatorEvent_t
 enum commandType_t
 {
   moveToFloor,
-  userStop,
+  userAbort,
   userEmergStop,
   cutPower
 };
@@ -102,4 +102,4 @@ typedef struct
   commandSource_t from;
 } userCommand_t;
 
-#endif 
+#endif  
