@@ -908,9 +908,9 @@ void configureserver()
             {
               String message;
               Serial.println("actionpage.html, HTTP_POST actionpage received , processing....");
-
+              Serial.printf("Total Parameters Received: %d\n", request->params());
               //**********************************************
-
+              preferences.begin("my-config", false);
               // List all parameters int params = request->params();
               int params = request->params();
               for (int i = 0; i < params; i++)
@@ -918,21 +918,43 @@ void configureserver()
                 AsyncWebParameter *p = request->getParam(i);
                 if (p->isPost())
                 {
-                  Serial.print(i);
-                  Serial.print(F("\t"));
-                  Serial.print(p->name().c_str());
-                  Serial.print(F("\t"));
-                  Serial.println(p->value().c_str());
-                  // Serial.print(F("\t"))
+                  // Serial.print(i);
+                  // Serial.print(F("\t"));
+                  // Serial.print(p->name().c_str());
+                  // Serial.print(F("\t"));
+                  // Serial.println(p->value().c_str());
+                  String paramName = p->name();
+                  String paramValue = p->value();
 
-                  // Serial.println(i,'/T',p->name().c_str(),'/T',p->value().c_str());
-                  //  Serial.println(i,'/T',p->name().c_str(),'/T',p->value().c_str());
-                  // Serial.println(i,'/T',p->name().c_str(),'/T',p->value().c_str());
-                  // Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
+                  Serial.print("Param: ");
+                  Serial.print(paramName);
+                  Serial.print(" = ");
+                  Serial.println(paramValue);
+
+                  // if (paramName == "hmt_runtime_param")
+                  // {
+                  //   uint32_t hour_meter_runtime_offset_MS;
+                  //   hour_meter_runtime_offset = paramValue.toInt();
+                  //   hour_meter_runtime_offset_MS = hour_meter_runtime_offset * 60 * 1000; // Convert minutes to milliseconds
+
+                  //   if (xSemaphoreTake(hasChangedMutex, portMAX_DELAY) == pdTRUE)
+                  //   {
+                  //     hour_meter_runtime += hour_meter_runtime_offset_MS;
+                  //     hour_meter_hasChanged = true;
+                  //     xSemaphoreGive(hasChangedMutex);
+                  //   }
+                    
+
+                  //   preferences.putUInt("hourmeter", hour_meter_runtime);
+                  // }
                 }
               }
 
+              // preferences.end();
+              // Serial.println("--- Updated Variables ---");
+              // Serial.printf("Hour Meter Offset: %d\n", hour_meter_runtime_offset);
               //**********************************************
+
 
               if (request->hasParam(PARAM_MESSAGE, true))
               {
