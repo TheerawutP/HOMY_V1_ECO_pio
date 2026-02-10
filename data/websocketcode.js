@@ -119,7 +119,7 @@ function onMessage(evt) {
 
             var btnUp = document.getElementById("btnUp");
             var btnDown = document.getElementById("btnDown");
-            var btnEmg = document.getElementById("btnEmergency");
+            // var btnEmg = document.getElementById("btnEmergency");
 
             if ('floorValue' in m_json_obj) {
                 var floorNumDisplay = document.querySelector("#FloorValue .floor-num");
@@ -128,33 +128,40 @@ function onMessage(evt) {
                 }
             }
 
-            if (m_json_obj.Moving) {
-                if (m_json_obj.Up === true) {
+            if (m_json_obj.state === "STATE_RUNNING") {
+                if (m_json_obj.up === true) {
                     btnUp?.classList.add("active");
                 } else {
                     btnUp?.classList.remove("active");
                 }
 
-                if (m_json_obj.Down === true) {
+                if (m_json_obj.down === true) {
                     btnDown?.classList.add("active");
                 } else {
                     btnDown?.classList.remove("active");
                 }
-            } else {
+            // }else if(m_json_obj.state === "STATE_PENDING"){
+
+            // }
+            // else if(m_json_obj.state === "STATE_PAUSED"){
+                
+            // }else if(m_json_obj.state === "STATE_EMERGENCY"){
+                
+            // }
+            }else {
                 btnUp?.classList.remove("active");
                 btnDown?.classList.remove("active");
             }
 
-            // จัดการโหมด Emergency
-            if ('Mode' in m_json_obj) {
-                if (m_json_obj.Mode === "EMERGENCY") {
-                    btnEmg?.classList.add("blink");
-                } else {
-                    btnEmg?.classList.remove("blink");
-                }
-            }
+            // if ('Mode' in m_json_obj) {
+            //     if (m_json_obj.Mode === "EMERGENCY") {
+            //         btnEmg?.classList.add("blink");
+            //     } else {
+            //         btnEmg?.classList.remove("blink");
+            //     }
+            // }
 
-            if ('BtwFloor' in m_json_obj) {
+            if (m_json_obj.btwFloor === true) {
                 var floorMsg = document.querySelector("#FloorValue .floor-msg");
                 
                 if (floorMsg) {
