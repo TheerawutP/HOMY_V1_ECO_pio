@@ -108,6 +108,12 @@ function addData(label, data) {
 
 // Called when a message is received from the server
 function onMessage(evt) {
+    const STATE_IDLE = 0;
+    const STATE_RUNNING = 1;
+    const STATE_PENDING = 2;
+    const STATE_PAUSED = 3;
+    const STATE_EMERGENCY = 4;
+
     console.log("onMessage called");
 
     if (typeof (evt.data) == "string") {
@@ -128,7 +134,7 @@ function onMessage(evt) {
                 }
             }
 
-            if (m_json_obj.state === "STATE_RUNNING") {
+            if (m_json_obj.state == STATE_RUNNING || m_json_obj.state == STATE_PENDING) {
                 if (m_json_obj.up === true) {
                     btnUp?.classList.add("active");
                 } else {
@@ -140,15 +146,9 @@ function onMessage(evt) {
                 } else {
                     btnDown?.classList.remove("active");
                 }
-            // }else if(m_json_obj.state === "STATE_PENDING"){
 
-            // }
-            // else if(m_json_obj.state === "STATE_PAUSED"){
-                
-            // }else if(m_json_obj.state === "STATE_EMERGENCY"){
-                
-            // }
-            }else {
+            } else {
+                // ถ้าลิฟต์จอด (IDLE) ให้ดับไฟปุ่มทั้งหมด
                 btnUp?.classList.remove("active");
                 btnDown?.classList.remove("active");
             }
@@ -161,14 +161,14 @@ function onMessage(evt) {
             //     }
             // }
 
-            if (m_json_obj.btwFloor === true) {
+            if ('btwFloor' in m_json_obj) {
                 var floorMsg = document.querySelector("#FloorValue .floor-msg");
-                
+
                 if (floorMsg) {
-                    if (m_json_obj.BtwFloor === true) {
-                        floorMsg.classList.add("show"); 
+                    if (m_json_obj.btwFloor === true) {
+                        floorMsg.classList.add("show");
                     } else {
-                        floorMsg.classList.remove("show"); 
+                        floorMsg.classList.remove("show");
                     }
                 }
             }
