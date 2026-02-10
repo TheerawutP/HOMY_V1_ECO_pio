@@ -23,7 +23,8 @@ enum modbusStation_t
 {
   INVERTER_STA,
   CABIN_STA,
-  HALL_STA,
+  HALL_2_STA,
+  HALL_1_STA,
   VSG_STA
 };
 
@@ -80,6 +81,7 @@ enum elevatorEvent_t
   clearCommand,
   reachFloor1,
   reachFloor2,
+  powerRestored
 };
 
 enum commandType_t
