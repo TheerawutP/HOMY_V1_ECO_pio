@@ -45,6 +45,9 @@
 
 #define TORQUE_RATED 50
 
+const uint8_t MIN_FLOOR = 1;
+uint8_t MAX_FLOOR = 2;
+
 const char *mqtt_broker = "kit.flinkone.com";
 const int mqtt_port = 1883; // unencrypt
 const char *KIT_topic = "kit";
@@ -1078,7 +1081,11 @@ void eventListener(uint32_t ulNotificationValue, elevatorEvent_t *emg)
     break;
 
   case noPowerLanding:
-    // handle no power
+    updateElevator(&elevator, (update_status_t){
+                                  .set = {.state = true},
+                                  .state = STATE_EMERGENCY,
+                                  });
+    xTaskNotifyGive(xNoPowerLandingHandle);
     break;
 
   case pollingTimeout:
@@ -1101,6 +1108,13 @@ void eventListener(uint32_t ulNotificationValue, elevatorEvent_t *emg)
                                   .btwFloor = false});
     break;
 
+  case powerRestored:
+    updateElevator(&elevator, (update_status_t){
+                                  .set = {.state = true, .isBrake = true},
+                                  .state = STATE_IDLE,
+                                  .isBrake = true});
+    break;
+
   default:
     break;
   }
@@ -1120,11 +1134,13 @@ void getDir(uint8_t target, transitCommand_t *cmd)
                                   .set = {
                                       .state = true,
                                       .dir = true,
-                                      .target = true},
+                                      .target = true,
+                                      .lastTarget = true},
 
                                   .state = STATE_PENDING,
                                   .dir = newDir,
-                                  .target = newTarget});
+                                  .target = newTarget,
+                                  .lastTarget = newTarget});
   }
   else
   {
@@ -1190,12 +1206,11 @@ void abortMotion()
   BRK_ON();
 
   updateElevator(&elevator, (update_status_t){
-                                .set = {.state = true, .dir = true, .lastDir = true, .target = true, .lastTarget = true, .isBrake = true},
+                                .set = {.state = true, .dir = true, .lastDir = true, .target = true, .isBrake = true},
                                 .state = STATE_IDLE,
                                 .dir = DIR_NONE,
                                 .lastDir = elevator.dir,
                                 .target = 0,
-                                .lastTarget = elevator.target,
                                 .isBrake = true});
 
   Serial.println("Elevator Halted.");
@@ -1329,9 +1344,6 @@ void vOchestrator(void *pvParameters)
         if (elevator.state == STATE_RUNNING)
         {
           abortMotion();
-          // updateElevator(&elevator, (update_status_t){
-          //                               .set = {.state = true},
-          //                               .state = STATE_IDLE});
         }
         break;
       }
@@ -1599,32 +1611,43 @@ void vPollingFloorSensor2(void *pvParams) // first floor sensor
 
 void vPollingNoPower(void *pvParams)
 {
+  uint8_t stable_counter = 0;
+  const uint8_t THRESHOLD = 20;
+  bool lastIsNoPower = false;
+
   for (;;)
   {
-    uint8_t noPower_counter = 0;
-    const uint8_t STABLE_THRESHOLD = 20;
+    bool raw_noPower = (digitalRead(NoPower) == LOW);
 
-    for (;;)
+    if (raw_noPower)
     {
-      bool raw_noPower = (digitalRead(NoPower) == LOW);
-      if (raw_noPower)
-      {
-        if (noPower_counter < STABLE_THRESHOLD)
-          noPower_counter++;
-      }
-      else
-      {
-        noPower_counter = 0;
-      }
-
-      bool isNoPower = (noPower_counter >= STABLE_THRESHOLD);
-
-      if (isNoPower == true)
-      {
-        xTaskNotify(xOchestratorHandle, noPowerLanding, eSetValueWithOverwrite);
-      }
-      vTaskDelay(pdMS_TO_TICKS(20));
+      if (stable_counter < THRESHOLD)
+        stable_counter++;
     }
+    else
+    {
+      if (stable_counter > 0)
+        stable_counter--;
+    }
+
+    bool currentIsNoPower = (stable_counter >= THRESHOLD);
+    bool currentIsPowerOK = (stable_counter == 0);
+
+    if (currentIsNoPower && !lastIsNoPower)
+    {
+      Serial.println(">> Event: Power LOST!");
+      xTaskNotify(xOchestratorHandle, noPowerLanding, eSetValueWithOverwrite);
+      lastIsNoPower = true;
+    }
+
+    else if (currentIsPowerOK && lastIsNoPower)
+    {
+      Serial.println(">> Event: Power RESTORED!");
+      xTaskNotify(xOchestratorHandle, powerRestored, eSetValueWithOverwrite);
+      lastIsNoPower = false;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
 
@@ -1649,7 +1672,10 @@ void vNoPowerLanding(void *pvParams)
 {
   for (;;)
   {
-    vTaskDelay(10);
+    if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY) > 0)
+    {
+      
+    }
   }
 }
 
@@ -1663,9 +1689,48 @@ void vPollingTimeout(void *pvParams)
 
 void vClearCommand(void *pvParams)
 {
-  for (;;)
+for (;;)
   {
-    vTaskDelay(10);
+    if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY) > 0)
+    {
+      // Serial.println(">> EMERGENCY: Landing Sequence Started!");
+      
+      while (!(elevator.pos == MIN_FLOOR && elevator.btwFloor == false))
+      {
+
+        if (elevator.state != STATE_EMERGENCY) break;
+
+        BRK_OFF();
+        updateElevator(&elevator, (update_status_t){
+            .set = {.isBrake = true}, 
+            .isBrake = false
+        });
+
+        vTaskDelay(pdMS_TO_TICKS(500)); 
+
+        // if (elevator.pos == MIN_FLOOR && elevator.btwFloor == false) {
+        //      Serial.println(">> Reached Floor 1!");
+        //      break;
+        // }
+
+        if (elevator.state != STATE_EMERGENCY) break; 
+
+        BRK_ON();
+        updateElevator(&elevator, (update_status_t){
+            .set = {.isBrake = true}, 
+            .isBrake = true
+        });
+
+        vTaskDelay(pdMS_TO_TICKS(2000));
+      }
+
+      
+      BRK_ON(); 
+      updateElevator(&elevator, (update_status_t){
+          .set = {.isBrake = true},
+          .isBrake = true
+      });
+    }
   }
 }
 
@@ -1751,14 +1816,14 @@ void vStatusLogger(void *pvParams)
     printElevatorStatus();
 
     if (elevator.pos != lastPOS || elevator.btwFloor != lastBtw)
-    if(elevator.pos != lastPOS)
-    {
+      if (elevator.pos != lastPOS)
+      {
 
-      saveStatus();
+        saveStatus();
 
-      lastPOS = elevator.pos;
-      lastBtw = elevator.btwFloor;
-    }
+        lastPOS = elevator.pos;
+        lastBtw = elevator.btwFloor;
+      }
     vTaskDelay(3000);
   }
 }
@@ -1769,8 +1834,6 @@ void vUpdatePage(void *pvParams)
 
   for (;;)
   {
-
-
 
     m_websocketserver.loop();
 
@@ -1794,11 +1857,11 @@ void vUpdatePage(void *pvParams)
         jsonBuf,
         sizeof(jsonBuf),
         "{\"floorValue\":%d,"
-        "\"state\":%s,",
+        "\"state\":%d,"
         "\"up\":%s,"
         "\"down\":%s,"
         "\"targetFloor\":%d,"
-        "\"btwFloor\":%s,",
+        "\"btwFloor\":%s}",
         elevator.pos,
         elevator.state,
         (elevator.dir == DIR_UP) ? "true" : "false",
@@ -1904,25 +1967,28 @@ void setup()
 
   xStartRunningTimer = xTimerCreate("startRunning", WAIT_TO_RUNNING_MS, pdFALSE, NULL, vStartRunning);
 
-  xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 3, NULL);
-  xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 3, NULL);
-  xTaskCreate(vStatusLogger, "StatusLogger", 2048, NULL, 2, NULL);
-  xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 3, NULL);
+  xTaskCreate(vOchestrator, "Ochestrator", 4096, NULL, 7, &xOchestratorHandle);
 
-  xTaskCreate(vOchestrator, "Ochestrator", 4096, NULL, 3, &xOchestratorHandle);
-  xTaskCreate(vRFReceiver, "RFReceiver", 3072, NULL, 3, &xRFReceiverHandleHandle);
-  xTaskCreate(vPollingModbus, "PollingModbus", 3072, NULL, 3, &xPollingModbusHandle);
-  xTaskCreate(vPollingFloorSensor1, "PollingFloorSensor", 2048, NULL, 3, &xPollingFloorSensor1Handle);
-  xTaskCreate(vPollingFloorSensor2, "PollingFloorSensor2", 2048, NULL, 3, &xPollingFloorSensor2Handle);
-  xTaskCreate(vPollingNoPower, "PollingNoPower", 2048, NULL, 3, &xPollingNoPowerHandle);
-  xTaskCreate(vSafetySling, "SafetySling", 1536, NULL, 3, &xSafetySlingHandle);
-  xTaskCreate(vEmergeStop, "EmergeStop", 1536, NULL, 3, &xEmergeStopHandle);
-  xTaskCreate(vNoPowerLanding, "NoPowerLanding", 1536, NULL, 3, &xNoPowerLandingHandle);
-  xTaskCreate(vPollingTimeout, "PollingTimeout", 1536, NULL, 3, &xPollingTimeoutHandle);
-  xTaskCreate(vClearCommand, "ClearCommand", 1536, NULL, 3, &xClearCommandHandle);
+  xTaskCreate(vSafetySling, "SafetySling", 1536, NULL, 6, &xSafetySlingHandle);
+  xTaskCreate(vEmergeStop, "EmergeStop", 1536, NULL, 6, &xEmergeStopHandle);
+
+  xTaskCreate(vPollingTimeout, "PollingTimeout", 1536, NULL, 5, &xPollingTimeoutHandle);
+  xTaskCreate(vNoPowerLanding, "NoPowerLanding", 1536, NULL, 4, &xNoPowerLandingHandle);
+  xTaskCreate(vClearCommand, "ClearCommand", 1536, NULL, 4, &xClearCommandHandle);
+
+  xTaskCreate(vPollingModbus, "PollingModbus", 3072, NULL, 4, &xPollingModbusHandle);
+  xTaskCreate(vPollingFloorSensor1, "PollingFloorSensor", 2048, NULL, 4, &xPollingFloorSensor1Handle);
+  xTaskCreate(vPollingFloorSensor2, "PollingFloorSensor2", 2048, NULL, 4, &xPollingFloorSensor2Handle);
+  xTaskCreate(vPollingNoPower, "PollingNoPower", 2048, NULL, 4, &xPollingNoPowerHandle);
+
+  xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 2, NULL);
+  xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 2, NULL);
+  xTaskCreate(vStatusLogger, "StatusLogger", 2048, NULL, 2, NULL);
+  xTaskCreate(vUpdatePage, "UpdatePage", 4096, NULL, 2, NULL);
+  xTaskCreate(vRFReceiver, "RFReceiver", 3072, NULL, 2, &xRFReceiverHandleHandle);
 
   delay(500);
-
+  digitalWrite(WIFI_READY, HIGH);
   Serial.print("Heap free memory (in bytes)= ");
   Serial.println(ESP.getFreeHeap());
   Serial.println(F("Setup complete."));

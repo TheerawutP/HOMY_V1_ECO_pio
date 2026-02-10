@@ -12,9 +12,6 @@ extern Preferences preferences;
 extern volatile uint8_t POS;
 extern bool btwFloor;
 
-
-
-
 extern const char* STATUS_FILE;
 
 void saveStatus();
