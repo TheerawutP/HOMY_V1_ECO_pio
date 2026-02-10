@@ -43,6 +43,7 @@ typedef struct
   uint8_t lastTarget;
   bool isBrake;
   bool btwFloor;
+  bool hasChanged;
 } status_t;
 
 
@@ -56,6 +57,7 @@ typedef struct {
         bool lastTarget : 1;
         bool isBrake : 1;
         bool btwFloor : 1;
+        bool hasChanged : 1;
     } set; 
 
     uint8_t pos;
@@ -66,6 +68,7 @@ typedef struct {
     uint8_t lastTarget;
     bool isBrake;
     bool btwFloor;
+    bool hasChanged;
 } update_status_t;
 
 enum elevatorEvent_t

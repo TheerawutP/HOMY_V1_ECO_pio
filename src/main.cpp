@@ -98,7 +98,8 @@ status_t elevator = {
     .target = 0,
     .lastTarget = 0,
     .isBrake = true,
-    .btwFloor = false};
+    .btwFloor = false,
+    .hasChanged = false};
 
 modbusStation_t currentStation = INVERTER_STA;
 
@@ -943,7 +944,6 @@ void configureserver()
                   //     hour_meter_hasChanged = true;
                   //     xSemaphoreGive(hasChangedMutex);
                   //   }
-                    
 
                   //   preferences.putUInt("hourmeter", hour_meter_runtime);
                   // }
@@ -954,7 +954,6 @@ void configureserver()
               // Serial.println("--- Updated Variables ---");
               // Serial.printf("Hour Meter Offset: %d\n", hour_meter_runtime_offset);
               //**********************************************
-
 
               if (request->hasParam(PARAM_MESSAGE, true))
               {
@@ -1060,6 +1059,7 @@ void updateElevator(status_t *dest, update_status_t up)
   if (up.set.btwFloor)
     dest->btwFloor = up.btwFloor;
 
+  dest->hasChanged = true;
   // taskEXIT_CRITICAL();
 }
 
@@ -1120,13 +1120,11 @@ void getDir(uint8_t target, transitCommand_t *cmd)
                                   .set = {
                                       .state = true,
                                       .dir = true,
-                                      .target = true
-                                      },
+                                      .target = true},
 
                                   .state = STATE_PENDING,
                                   .dir = newDir,
-                                  .target = newTarget
-                                  });
+                                  .target = newTarget});
   }
   else
   {
@@ -1147,13 +1145,11 @@ void getDir(uint8_t target, transitCommand_t *cmd)
                                     .set = {
                                         .state = true,
                                         .dir = true,
-                                        .target = true
-                                        },
+                                        .target = true},
 
                                     .state = STATE_PENDING,
                                     .dir = newDir,
-                                    .target = newTarget
-                                    });
+                                    .target = newTarget});
     }
     else
     {
@@ -1175,8 +1171,7 @@ void transit(transitCommand_t cmd)
                                   .set = {
                                       .state = true,
                                       .isBrake = true,
-                                      .btwFloor = true
-                                      },
+                                      .btwFloor = true},
 
                                   .state = STATE_RUNNING,
                                   .isBrake = false,
@@ -1301,8 +1296,7 @@ void vOchestrator(void *pvParameters)
                                       .state = STATE_IDLE,
                                       .dir = DIR_NONE,
                                       .target = 0,
-                                      .isBrake = true
-                                      });
+                                      .isBrake = true});
 
         reachedFloorNum = 0;
         Serial.printf("Reached Target Floor %d: Stopping...\n", elevator.pos);
@@ -1325,8 +1319,9 @@ void vOchestrator(void *pvParameters)
       switch (cmd)
       {
       case moveToFloor:
-        if(elevator.state == STATE_IDLE){
-        getDir(targetFloor, &command);
+        if (elevator.state == STATE_IDLE)
+        {
+          getDir(targetFloor, &command);
         }
         break;
 
@@ -1747,23 +1742,23 @@ void vPublishTask(void *pvParams)
 
 void vStatusLogger(void *pvParams)
 {
-  // int lastPOS = -1;
-  // bool lastBtw = false;
+  int lastPOS = 0;
+  bool lastBtw = false;
 
   for (;;)
   {
 
     printElevatorStatus();
 
-    // if (POS != lastPOS || btwFloor != lastBtw)
-    // // if(POS != lastPOS)
-    // {
+    if (elevator.pos != lastPOS || elevator.btwFloor != lastBtw)
+    if(elevator.pos != lastPOS)
+    {
 
-    //   saveStatus();
+      saveStatus();
 
-    //   lastPOS = POS;
-    //   // lastBtw = btwFloor;
-    // }
+      lastPOS = elevator.pos;
+      lastBtw = elevator.btwFloor;
+    }
     vTaskDelay(3000);
   }
 }
@@ -1774,6 +1769,9 @@ void vUpdatePage(void *pvParams)
 
   for (;;)
   {
+
+
+
     m_websocketserver.loop();
 
     // uint8_t pos;
@@ -1792,25 +1790,25 @@ void vUpdatePage(void *pvParams)
     //   continue;
     // }
 
-    // snprintf(
-    //     jsonBuf,
-    //     sizeof(jsonBuf),
-    //     "{\"floorValue\":%d,"
-    //     "\"Up\":%s,"
-    //     "\"Down\":%s,"
-    //     "\"BtwFloor\":%s,"
-    //     "\"Moving\":%s,"
-    //     "\"TargetFloor\":%d,"
-    //     "\"Mode\":\"%s\"}",
-    //     pos,
-    //     (statusCopy.dir == UP) ? "true" : "false",
-    //     (statusCopy.dir == DOWN) ? "true" : "false",
-    //     statusCopy.btwFloor ? "true" : "false",
-    //     (statusCopy.state == MOVING) ? "true" : "false",
-    //     statusCopy.targetFloor,
-    //     (statusCopy.mode == NORMAL) ? "NORMAL" : "EMERGENCY");
+    snprintf(
+        jsonBuf,
+        sizeof(jsonBuf),
+        "{\"floorValue\":%d,"
+        "\"state\":%s,",
+        "\"up\":%s,"
+        "\"down\":%s,"
+        "\"targetFloor\":%d,"
+        "\"btwFloor\":%s,",
+        elevator.pos,
+        elevator.state,
+        (elevator.dir == DIR_UP) ? "true" : "false",
+        (elevator.dir == DIR_DOWN) ? "true" : "false",
+        elevator.target,
+        (elevator.btwFloor) ? "true" : "false");
 
-    // m_websocketserver.broadcastTXT(jsonBuf, strlen(jsonBuf));
+    m_websocketserver.broadcastTXT(jsonBuf, strlen(jsonBuf));
+
+    elevator.hasChanged = false;
 
     vTaskDelay(pdMS_TO_TICKS(10));
   }
@@ -1834,7 +1832,7 @@ void setup()
     return;
   }
 
-  // loadStatus();
+  loadStatus();
   delay(500);
 
   RF.enableReceive(RFReceiver);
