@@ -48,6 +48,9 @@
 
 #define TORQUE_RATED 50
 
+volatile uint32_t modbusDelayTime = 20;
+volatile uint32_t modbusRetryTime = 10;
+
 const uint8_t MIN_FLOOR = 1;
 uint8_t MAX_FLOOR = 2;
 
@@ -238,7 +241,6 @@ void updateElevator(status_t *dest, update_status_t up)
   dest->hasChanged = true;
   // taskEXIT_CRITICAL();
 }
-
 
 void setupMQTT()
 {
@@ -1078,7 +1080,6 @@ void configureserver()
   server.begin();
 }
 
-
 void eventListener(uint32_t ulNotificationValue, elevatorEvent_t *emg)
 {
   *emg = (elevatorEvent_t)ulNotificationValue;
@@ -1316,6 +1317,16 @@ void vOchestrator(void *pvParameters)
   elevatorEvent_t evtType;
   uint8_t reachedFloorNum = 0;
 
+  const uint32_t SLOW_POLL_MS = 500;
+  const uint32_t SLOW_RETRY_MS = 50;
+
+  const uint32_t FAST_POLL_MS = 20;
+  const uint32_t FAST_RETRY_MS = 10;
+
+  const unsigned long IDLE_TIMEOUT = 10 * 60 * 1000;
+
+  uint32_t lastCommandTime = 0;
+
   for (;;)
   {
 
@@ -1364,6 +1375,10 @@ void vOchestrator(void *pvParameters)
     {
       commandType_t cmd = userCommand.type;
       uint8_t targetFloor = userCommand.target;
+      
+      lastCommandTime = millis();
+      modbusDelayTime = FAST_POLL_MS;
+      modbusRetryTime = FAST_RETRY_MS;
 
       switch (cmd)
       {
@@ -1382,7 +1397,19 @@ void vOchestrator(void *pvParameters)
         break;
       }
     }
+    /////////////////////////////////slow polling count//////////////////////////////////////////
+    if ((millis() - lastCommandTime > IDLE_TIMEOUT) && (elevator.state == STATE_IDLE))
+    {
+      if (modbusDelayTime != SLOW_POLL_MS)
+      {
+        modbusDelayTime = SLOW_POLL_MS;
+      }
 
+      if (modbusRetryTime != SLOW_RETRY_MS)
+      {
+        modbusRetryTime = SLOW_RETRY_MS;
+      }
+    }
     ///////////////////////////////////state of elevator////////////////////////////////////////
 
     switch (elevator.state)
@@ -1527,10 +1554,10 @@ void vStartRunning(TimerHandle_t xTimer)
 //   uint16_t FIRST_REG_HALL = 0;
 //   uint16_t FIRST_REG_VSG = 0;
 
-//   uint16_t NUM_READ_INVERTER = 19;
-//   uint16_t NUM_READ_CABIN = 16;
-//   uint16_t NUM_READ_HALL = 16;
-//   uint16_t NUM_READ_VSG = 16;
+//   uint16_t NUM_READ_INVERTER = 1;
+//   uint16_t NUM_READ_CABIN = 2;
+//   uint16_t NUM_READ_HALL = 2;
+//   uint16_t NUM_READ_VSG = 2;
 
 //   uint16_t pollingData[5][32];
 //   memset(pollingData, 0, sizeof(pollingData));
@@ -1539,79 +1566,24 @@ void vStartRunning(TimerHandle_t xTimer)
 
 //   for (;;)
 //   {
-//     uint8_t retry_count = 0;
-//     bool read_success = false;
 
 //     switch (currentStation)
 //     {
-//     case INVERTER_STA:
 
-//       for (retry_count = 0; retry_count < MAX_RETRIES; retry_count++)
+//     case CABIN_STA:
+//       readDataFrom(CABIN_ID, FIRST_REG_CABIN, NUM_READ_CABIN, pollingData[CABIN_ID]);
+//       if (pollingData[CABIN_ID][0] == 2)
 //       {
-//         if (readDataFrom(INVERTER_ID, FIRST_REG_INVERTER, NUM_READ_INVERTER, pollingData[INVERTER_ID]))
-//         {
-//           read_success = true;
-//           break;
-//         }
-//         vTaskDelay(pdMS_TO_TICKS(10));
+//           Serial.println("up");
 //       }
-
-//       if (read_success)
+//       else if (pollingData[CABIN_ID][0] == 4)
 //       {
-//         if (pollingData[INVERTER_ID][7] == 992)
-//         {
-//           xTaskNotify(xOchestratorHandle, clearCommand, eSetValueWithOverwrite);
-//         }
-//         else if (pollingData[INVERTER_ID][6] > TORQUE_RATED)
-//         {
-//           xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-//         }
-//       }
-//       else
-//       {
-//         Serial.println(">> Timeout reading Inverter!");
-//         xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+//           Serial.println("down");
 //       }
 
 //       currentStation = CABIN_STA;
 //       break;
 
-//     case CABIN_STA:
-//       readDataFrom(CABIN_ID, FIRST_REG_CABIN, NUM_READ_CABIN, pollingData[CABIN_ID]);
-//       if (pollingData[CABIN_ID][0] == 1)
-//       {
-//         xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-//       }
-//       else if (pollingData[CABIN_ID][1] == 1)
-//       {
-//         xTaskNotify(xOchestratorHandle, safetySling, eSetValueWithOverwrite);
-//       }
-
-//       currentStation = HALL_2_STA;
-//       break;
-
-//     case HALL_2_STA:
-//       readDataFrom(HALL_2_ID, FIRST_REG_HALL, NUM_READ_HALL, pollingData[HALL_2_ID]);
-//       if (pollingData[HALL_2_ID][0] == 1)
-//       {
-//         xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-//       }
-//       else
-//       {
-//         if (elevator.state == STATE_PAUSED)
-//           xTaskNotify(xOchestratorHandle, emergClear, eSetValueWithOverwrite);
-//       }
-//       currentStation = VSG_STA;
-//       break;
-
-//     case VSG_STA:
-//       readDataFrom(VSG_ID, FIRST_REG_VSG, NUM_READ_VSG, pollingData[VSG_ID]);
-//       if (pollingData[VSG_ID][0] == 1)
-//       {
-//         xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-//       }
-//       currentStation = INVERTER_STA;
-//       break;
 //     }
 //     vTaskDelay(pdMS_TO_TICKS(20));
 //   }
@@ -1629,10 +1601,10 @@ void vPollingModbus(void *pvParams)
   uint16_t FIRST_REG_HALL = 0;
   uint16_t FIRST_REG_VSG = 0;
 
-  uint16_t NUM_READ_INVERTER = 19;
-  uint16_t NUM_READ_CABIN = 16;
-  uint16_t NUM_READ_HALL = 16;
-  uint16_t NUM_READ_VSG = 16;
+  uint16_t NUM_READ_INVERTER = 10;
+  uint16_t NUM_READ_CABIN = 2;
+  uint16_t NUM_READ_HALL = 2;
+  uint16_t NUM_READ_VSG = 2;
 
   uint16_t pollingData[5][32];
   memset(pollingData, 0, sizeof(pollingData));
@@ -1663,7 +1635,7 @@ void vPollingModbus(void *pvParams)
           read_success = true;
           break;
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(modbusRetryTime);
       }
 
       if (read_success)
@@ -1703,7 +1675,7 @@ void vPollingModbus(void *pvParams)
           read_success = true;
           break;
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(modbusRetryTime);
       }
 
       if (read_success)
@@ -1718,14 +1690,14 @@ void vPollingModbus(void *pvParams)
           cabin_safe = true;
         }
 
-        if (pollingData[CABIN_ID][1] == 1)
-        {
-          xTaskNotify(xOchestratorHandle, safetySling, eSetValueWithOverwrite);
-        }
+        // if (pollingData[CABIN_ID][1] == 1)
+        // {
+        //   xTaskNotify(xOchestratorHandle, safetySling, eSetValueWithOverwrite);
+        // }
       }
       else
       {
-        // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+        xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
         cabin_safe = false;
       }
 
@@ -1736,34 +1708,34 @@ void vPollingModbus(void *pvParams)
     // CASE 3: HALL 2
     // -----------------------------------------------------------
     case HALL_2_STA:
-      read_success = false;
-      for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
-      {
-        if (readDataFrom(HALL_2_ID, FIRST_REG_HALL, NUM_READ_HALL, pollingData[HALL_2_ID]))
-        {
-          read_success = true;
-          break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));
-      }
+      // read_success = false;
+      // for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
+      // {
+      //   if (readDataFrom(HALL_2_ID, FIRST_REG_HALL, NUM_READ_HALL, pollingData[HALL_2_ID]))
+      //   {
+      //     read_success = true;
+      //     break;
+      //   }
+      //   vTaskDelay(pdMS_TO_TICKS(10));
+      // }
 
-      if (read_success)
-      {
-        if (pollingData[HALL_2_ID][0] == 1)
-        {
-          hall2_safe = false;
-          xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-        }
-        else
-        {
-          hall2_safe = true;
-        }
-      }
-      else
-      {
-        // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
-        hall2_safe = false;
-      }
+      // if (read_success)
+      // {
+      //   if (pollingData[HALL_2_ID][0] == 1)
+      //   {
+      //     hall2_safe = false;
+      //     xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
+      //   }
+      //   else
+      //   {
+      //     hall2_safe = true;
+      //   }
+      // }
+      // else
+      // {
+      //   // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+      //   hall2_safe = false;
+      // }
 
       currentStation = VSG_STA;
       break;
@@ -1780,7 +1752,7 @@ void vPollingModbus(void *pvParams)
           read_success = true;
           break;
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(modbusRetryTime);
       }
 
       if (read_success)
@@ -1797,13 +1769,13 @@ void vPollingModbus(void *pvParams)
       }
       else
       {
-        // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+        xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
         vsg_safe = false;
       }
 
       if (elevator.state == STATE_PAUSED)
       {
-        if (inv_safe && cabin_safe && hall2_safe && vsg_safe)
+        if (inv_safe && cabin_safe && vsg_safe)
         {
           xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
         }
@@ -1812,7 +1784,7 @@ void vPollingModbus(void *pvParams)
       currentStation = INVERTER_STA;
       break;
     }
-    vTaskDelay(pdMS_TO_TICKS(20));
+    vTaskDelay(modbusDelayTime);
   }
 }
 
@@ -2010,6 +1982,7 @@ void vNoPowerLanding(void *pvParams)
                                     .set = {.isBrake = true},
                                     .isBrake = true});
     }
+    vTaskDelay(10);
   }
 }
 
