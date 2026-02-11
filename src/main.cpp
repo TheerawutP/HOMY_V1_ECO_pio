@@ -132,20 +132,20 @@ inline void ROTATE(direction_t dir)
 inline void BRK_ON()
 {
   digitalWrite(BRK, LOW);
-  Serial.println("Brake ON");
+  // Serial.println("Brake ON");
 }
 
 inline void BRK_OFF()
 {
   digitalWrite(BRK, HIGH);
-  Serial.println("Brake OFF");
+  // Serial.println("Brake OFF");
 }
 
 inline void M_STP()
 {
   digitalWrite(R_UP, LOW);
   digitalWrite(R_DW, LOW);
-  Serial.println("Motor Stop");
+  // Serial.println("Motor Stop");
 }
 
 inline void emoActivate()
@@ -153,9 +153,92 @@ inline void emoActivate()
   digitalWrite(EMO, HIGH);
 }
 
-inline void emoDeactivate(){
+inline void emoDeactivate()
+{
   digitalWrite(EMO, LOW);
 }
+
+// main helpers
+const char *getStateString(state_t s)
+{
+  switch (s)
+  {
+  case STATE_IDLE:
+    return "IDLE";
+  case STATE_RUNNING:
+    return "RUNNING";
+  case STATE_PENDING:
+    return "PENDING";
+  case STATE_PAUSED:
+    return "PAUSED";
+  case STATE_EMERGENCY:
+    return "EMERGENCY";
+  default:
+    return "UNKNOWN";
+  }
+}
+
+const char *getDirString(direction_t d)
+{
+  switch (d)
+  {
+  case DIR_UP:
+    return "UP";
+  case DIR_DOWN:
+    return "DOWN";
+  case DIR_NONE:
+    return "NONE";
+  default:
+    return "UNKNOWN";
+  }
+}
+
+void printElevatorStatus()
+{
+  Serial.println("=========== ELEVATOR STATUS ===========");
+
+  Serial.printf("Position (pos):      %d\n", elevator.pos);
+  Serial.printf("Target Floor:        %d\n", elevator.target);
+  Serial.printf("Last Target:         %d\n", elevator.lastTarget);
+
+  Serial.printf("State:               %s\n", getStateString(elevator.state));
+  Serial.printf("Direction (dir):     %s\n", getDirString(elevator.dir));
+  Serial.printf("Last Dir:            %s\n", getDirString(elevator.lastDir));
+
+  Serial.printf("Brake (isBrake):     %s\n", elevator.isBrake ? "ON (Locked)" : "OFF (Released)");
+  Serial.printf("Between Floor:       %s\n", elevator.btwFloor ? "YES" : "NO");
+
+  Serial.println("=======================================");
+}
+
+void updateElevator(status_t *dest, update_status_t up)
+{
+  if (dest == NULL)
+    return;
+
+  // taskENTER_CRITICAL();
+
+  if (up.set.pos)
+    dest->pos = up.pos;
+  if (up.set.state)
+    dest->state = up.state;
+  if (up.set.dir)
+    dest->dir = up.dir;
+  if (up.set.lastDir)
+    dest->lastDir = up.lastDir;
+  if (up.set.target)
+    dest->target = up.target;
+  if (up.set.lastTarget)
+    dest->lastTarget = up.lastTarget;
+  if (up.set.isBrake)
+    dest->isBrake = up.isBrake;
+  if (up.set.btwFloor)
+    dest->btwFloor = up.btwFloor;
+
+  dest->hasChanged = true;
+  // taskEXIT_CRITICAL();
+}
+
 
 void setupMQTT()
 {
@@ -949,21 +1032,17 @@ void configureserver()
                   Serial.print(" = ");
                   Serial.println(paramValue);
 
-                  // if (paramName == "hmt_runtime_param")
-                  // {
-                  //   uint32_t hour_meter_runtime_offset_MS;
-                  //   hour_meter_runtime_offset = paramValue.toInt();
-                  //   hour_meter_runtime_offset_MS = hour_meter_runtime_offset * 60 * 1000; // Convert minutes to milliseconds
+                  if (paramName == "force_state")
+                  {
+                    int stateVal = paramValue.toInt();
 
-                  //   if (xSemaphoreTake(hasChangedMutex, portMAX_DELAY) == pdTRUE)
-                  //   {
-                  //     hour_meter_runtime += hour_meter_runtime_offset_MS;
-                  //     hour_meter_hasChanged = true;
-                  //     xSemaphoreGive(hasChangedMutex);
-                  //   }
+                    state_t newState = (state_t)stateVal;
+                    updateElevator(&elevator, (update_status_t){
+                                                  .set = {.state = true},
+                                                  .state = newState});
 
-                  //   preferences.putUInt("hourmeter", hour_meter_runtime);
-                  // }
+                    Serial.printf(">> Manual Force State to: %d \n", stateVal);
+                  }
                 }
               }
 
@@ -999,86 +1078,6 @@ void configureserver()
   server.begin();
 }
 
-// main helpers
-const char *getStateString(state_t s)
-{
-  switch (s)
-  {
-  case STATE_IDLE:
-    return "IDLE";
-  case STATE_RUNNING:
-    return "RUNNING";
-  case STATE_PENDING:
-    return "PENDING";
-  case STATE_PAUSED:
-    return "PAUSED";
-  case STATE_EMERGENCY:
-    return "EMERGENCY";
-  default:
-    return "UNKNOWN";
-  }
-}
-
-const char *getDirString(direction_t d)
-{
-  switch (d)
-  {
-  case DIR_UP:
-    return "UP";
-  case DIR_DOWN:
-    return "DOWN";
-  case DIR_NONE:
-    return "NONE";
-  default:
-    return "UNKNOWN";
-  }
-}
-
-void printElevatorStatus()
-{
-  Serial.println("=========== ELEVATOR STATUS ===========");
-
-  Serial.printf("Position (pos):      %d\n", elevator.pos);
-  Serial.printf("Target Floor:        %d\n", elevator.target);
-  Serial.printf("Last Target:         %d\n", elevator.lastTarget);
-
-  Serial.printf("State:               %s\n", getStateString(elevator.state));
-  Serial.printf("Direction (dir):     %s\n", getDirString(elevator.dir));
-  Serial.printf("Last Dir:            %s\n", getDirString(elevator.lastDir));
-
-  Serial.printf("Brake (isBrake):     %s\n", elevator.isBrake ? "ON (Locked)" : "OFF (Released)");
-  Serial.printf("Between Floor:       %s\n", elevator.btwFloor ? "YES" : "NO");
-
-  Serial.println("=======================================");
-}
-
-void updateElevator(status_t *dest, update_status_t up)
-{
-  if (dest == NULL)
-    return;
-
-  // taskENTER_CRITICAL();
-
-  if (up.set.pos)
-    dest->pos = up.pos;
-  if (up.set.state)
-    dest->state = up.state;
-  if (up.set.dir)
-    dest->dir = up.dir;
-  if (up.set.lastDir)
-    dest->lastDir = up.lastDir;
-  if (up.set.target)
-    dest->target = up.target;
-  if (up.set.lastTarget)
-    dest->lastTarget = up.lastTarget;
-  if (up.set.isBrake)
-    dest->isBrake = up.isBrake;
-  if (up.set.btwFloor)
-    dest->btwFloor = up.btwFloor;
-
-  dest->hasChanged = true;
-  // taskEXIT_CRITICAL();
-}
 
 void eventListener(uint32_t ulNotificationValue, elevatorEvent_t *emg)
 {
@@ -1686,7 +1685,7 @@ void vPollingModbus(void *pvParams)
       }
       else
       {
-        xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+        // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
         inv_safe = false;
       }
       currentStation = CABIN_STA;
@@ -1726,7 +1725,7 @@ void vPollingModbus(void *pvParams)
       }
       else
       {
-        xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+        // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
         cabin_safe = false;
       }
 
@@ -1762,7 +1761,7 @@ void vPollingModbus(void *pvParams)
       }
       else
       {
-        xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+        // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
         hall2_safe = false;
       }
 
@@ -1798,7 +1797,7 @@ void vPollingModbus(void *pvParams)
       }
       else
       {
-        xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+        // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
         vsg_safe = false;
       }
 
@@ -1941,7 +1940,7 @@ void vEmergStop(void *pvParams)
     {
       while (elevator.state == STATE_PAUSED)
       {
-        emoActivate;
+        emoActivate();
         BRK_ON();
         M_STP();
         vTaskDelay(10);
@@ -1959,7 +1958,7 @@ void vModbusTimeout(void *pvParams)
     {
       while (elevator.state == STATE_PAUSED)
       {
-        emoActivate;
+        emoActivate();
         BRK_ON();
         M_STP();
         vTaskDelay(10);
@@ -2018,6 +2017,10 @@ void vClearCommand(void *pvParams)
 {
   for (;;)
   {
+    if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY) > 0)
+    {
+      // Serial.println(">> Clear Command Received");
+    }
   }
 }
 
@@ -2248,7 +2251,7 @@ void setup()
   // xSemLanding = xSemaphoreCreateBinary();
 
   // xTransitMutex = xSemaphoreCreateMutex();
-  // mqttMutex = xSemaphoreCreateMutex();
+  mqttMutex = xSemaphoreCreateMutex();
   // hasChangedMutex = xSemaphoreCreateMutex();
 
   xQueueCommand = xQueueCreate(10, sizeof(userCommand_t));
