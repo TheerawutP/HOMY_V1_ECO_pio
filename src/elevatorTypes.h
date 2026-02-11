@@ -76,8 +76,9 @@ enum elevatorEvent_t
 {
   safetySling,
   emergStop,
+  pauseClear,
   noPowerLanding,
-  pollingTimeout,
+  modbusTimeout,
   clearCommand,
   reachFloor1,
   reachFloor2,
