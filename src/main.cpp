@@ -48,8 +48,8 @@
 
 #define TORQUE_RATED 50
 
-volatile uint32_t modbusDelayTime = 20;
-volatile uint32_t modbusRetryTime = 10;
+volatile uint32_t modbusDelayTime = 50;
+volatile uint32_t modbusRetryTime = 20;
 
 const uint8_t MIN_FLOOR = 1;
 uint8_t MAX_FLOOR = 2;
@@ -57,7 +57,7 @@ uint8_t MAX_FLOOR = 2;
 const char *mqtt_broker = "kit.flinkone.com";
 const int mqtt_port = 1883; // unencrypt
 const char *KIT_topic = "kit";
-const char *UT_case = "/UT_500";
+const char *UT_case = "/UT_55555";
 const char *system_status = "/sys_v2";
 const char *elevator_status = "/ele_status";
 const char *inverter_status = "/inv_status";
@@ -1220,11 +1220,9 @@ void transit(transitCommand_t cmd)
     ROTATE(cmd.dir);
     updateElevator(&elevator, (update_status_t){
                                   .set = {
-                                      .state = true,
                                       .isBrake = true,
                                       .btwFloor = true},
 
-                                  .state = STATE_RUNNING,
                                   .isBrake = false,
                                   .btwFloor = true});
   }
@@ -1320,8 +1318,8 @@ void vOchestrator(void *pvParameters)
   const uint32_t SLOW_POLL_MS = 500;
   const uint32_t SLOW_RETRY_MS = 50;
 
-  const uint32_t FAST_POLL_MS = 20;
-  const uint32_t FAST_RETRY_MS = 10;
+  const uint32_t FAST_POLL_MS = 50;
+  const uint32_t FAST_RETRY_MS = 20;
 
   const unsigned long IDLE_TIMEOUT = 10 * 60 * 1000;
 
@@ -1375,7 +1373,7 @@ void vOchestrator(void *pvParameters)
     {
       commandType_t cmd = userCommand.type;
       uint8_t targetFloor = userCommand.target;
-      
+
       lastCommandTime = millis();
       modbusDelayTime = FAST_POLL_MS;
       modbusRetryTime = FAST_RETRY_MS;
@@ -1420,10 +1418,11 @@ void vOchestrator(void *pvParameters)
       break;
 
     case STATE_PENDING:
-      xTimerStart(xStartRunningTimer, 0);
-      updateElevator(&elevator, (update_status_t){
-                                    .set = {.state = true},
-                                    .state = STATE_RUNNING});
+      if (xTimerIsTimerActive(xStartRunningTimer) == pdFALSE)
+      {
+        xTimerStart(xStartRunningTimer, 0);
+        Serial.println(">> Timer Started (Waiting 300ms...)");
+      }
       break;
 
     case STATE_RUNNING:
@@ -1536,9 +1535,12 @@ void vRFReceiver(void *pvParams)
 // timer callbacks
 void vStartRunning(TimerHandle_t xTimer)
 {
-  updateElevator(&elevator, (update_status_t){
-                                .set = {.state = true},
-                                .state = STATE_RUNNING});
+  if (elevator.dir != DIR_NONE)
+  {
+    updateElevator(&elevator, (update_status_t){
+                                  .set = {.state = true},
+                                  .state = STATE_RUNNING});
+  }
 }
 // polling threads
 
@@ -2041,30 +2043,49 @@ void vReconnectTask(void *pvParams)
 
 void vPublishTask(void *pvParams)
 {
+  char jsonBuf[256];
+
   for (;;)
   {
-    // if (xSemaphoreTake(hasChangedMutex, portMAX_DELAY) == pdTRUE)
-    // {
-    //   if (hasChanged == true)
-    //   {
+    if (elevator.hasChanged == true)
+    {
+      snprintf(mqtt_topic, sizeof(mqtt_topic), "%s%s%s%s",
+               KIT_topic, UT_case, system_status, elevator_status);
 
-    //     String status_payload = statusToJson_ELE(publish_status);
+      snprintf(jsonBuf, sizeof(jsonBuf),
+               "{"
+               "\"pos\":%d,"
+               "\"state\":\"%s\","
+               "\"dir\":\"%s\","
+               "\"lastDir\":\"%s\","
+               "\"target\":%d,"
+               "\"lastTarget\":%d,"
+               "\"isBrake\":%s,"
+               "\"btwFloor\":%s"
+               "}",
+               elevator.pos,
+               getStateString(elevator.state),
+               getDirString(elevator.dir),
+               getDirString(elevator.lastDir),
+               elevator.target,
+               elevator.lastTarget,
+               elevator.isBrake ? "true" : "false",
+               elevator.btwFloor ? "true" : "false");
 
-    //     snprintf(
-    //         mqtt_topic,
-    //         sizeof(mqtt_topic),
-    //         "%s%s%s%s",
-    //         KIT_topic,
-    //         UT_case,
-    //         system_status,
-    //         elevator_status);
+      if (xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE)
+      {
+        if (mqttClient.connected())
+        {
+          mqttClient.publish(mqtt_topic, jsonBuf);
+          Serial.println(">> MQTT Status Published");
+        }
+        xSemaphoreGive(mqttMutex);
+      }
 
-    //     publishMqtt(mqtt_topic, status_payload.c_str());
-    //     hasChanged = false;
-    //   }
-    //   xSemaphoreGive(hasChangedMutex);
-    // }
-    vTaskDelay(pdMS_TO_TICKS(20));
+      elevator.hasChanged = false;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 
@@ -2133,8 +2154,6 @@ void vUpdatePage(void *pvParams)
         (elevator.btwFloor) ? "true" : "false");
 
     m_websocketserver.broadcastTXT(jsonBuf, strlen(jsonBuf));
-
-    elevator.hasChanged = false;
 
     vTaskDelay(pdMS_TO_TICKS(10));
   }
