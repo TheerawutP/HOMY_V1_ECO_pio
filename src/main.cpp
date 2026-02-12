@@ -1535,11 +1535,24 @@ void vRFReceiver(void *pvParams)
 // timer callbacks
 void vStartRunning(TimerHandle_t xTimer)
 {
-  if (elevator.dir != DIR_NONE)
+  if (elevator.state == STATE_PENDING) 
   {
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {.state = true},
-                                  .state = STATE_RUNNING});
+    if (elevator.dir != DIR_NONE && elevator.target != 0) 
+    {
+       Serial.println(">> Timer Done: Valid Direction -> GO RUNNING!");
+       updateElevator(&elevator, (update_status_t){
+          .set = {.state = true},
+          .state = STATE_RUNNING
+       });
+    }
+    else 
+    {
+       Serial.println(">> Timer Done: No Direction -> GO IDLE");
+       updateElevator(&elevator, (update_status_t){
+          .set = {.state = true},
+          .state = STATE_IDLE
+       });
+    }
   }
 }
 // polling threads
