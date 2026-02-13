@@ -108,4 +108,27 @@ typedef struct
   commandSource_t from;
 } userCommand_t;
 
+///////////////////////////////obj in system.///////////////////////////
+typedef struct{
+  uint32_t running_hz;
+  uint32_t torque;
+  uint16_t inputState;
+} inveter_t; 
+
+typedef struct{
+  bool isDoorClosed;
+  bool isAimUP;
+  bool isAimDW;
+  bool isUserStop;
+  bool isEmergStop;
+  bool isBusy;
+} cabin_t;
+
+typedef struct{
+ bool isAlarm[5];
+ bool shouldStop;
+} vsg_t;
+
+
+
 #endif  
