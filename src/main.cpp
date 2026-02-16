@@ -39,6 +39,7 @@
 #define toFloor2 174740
 // #define POWER_CUT 174738
 #define STOP 174737
+#define INVERTER_DI_STOP 992
 
 // ms timings
 // #define DEBOUNCE_MS 1000
@@ -71,6 +72,7 @@ Preferences preferences;
 
 SemaphoreHandle_t mqttMutex; // Mutex to protect MQTT client
 SemaphoreHandle_t modbusMutex;
+SemaphoreHandle_t pollingDataMutex;
 
 QueueHandle_t xQueueCommand;
 
@@ -1388,35 +1390,8 @@ void vOchestrator(void *pvParams)
       // }
     }
 
-    //////////////////////////////////////handle any commands from user////////////////////////////
-
-    if (xQueueReceive(xQueueCommand, &userCommand, 0) == pdPASS)
-    {
-      commandType_t cmd = userCommand.type;
-      uint8_t targetFloor = userCommand.target;
-
-      lastCommandTime = millis();
-      modbusDelayTime = FAST_POLL_MS;
-      modbusRetryTime = FAST_RETRY_MS;
-
-      switch (cmd)
-      {
-      case moveToFloor:
-        if (elevator.state == STATE_IDLE)
-        {
-          getDir(targetFloor, &command);
-        }
-        break;
-
-      case userAbort:
-        if (elevator.state == STATE_RUNNING)
-        {
-          abortMotion();
-        }
-        break;
-      }
-    }
     /////////////////////////////////slow polling count//////////////////////////////////////////
+
     if ((millis() - lastCommandTime > IDLE_TIMEOUT) && (elevator.state == STATE_IDLE))
     {
       if (modbusDelayTime != SLOW_POLL_MS)
@@ -1429,13 +1404,31 @@ void vOchestrator(void *pvParams)
         modbusRetryTime = SLOW_RETRY_MS;
       }
     }
+
     ///////////////////////////////////state of elevator////////////////////////////////////////
 
     switch (elevator.state)
     {
 
     case STATE_IDLE:
-      //...
+
+      //////////////////////////////////////handle any commands from user////////////////////////////
+
+      if (xQueueReceive(xQueueCommand, &userCommand, 0) == pdPASS)
+      {
+        commandType_t cmd = userCommand.type;
+        uint8_t targetFloor = userCommand.target;
+
+        lastCommandTime = millis();
+        modbusDelayTime = FAST_POLL_MS;
+        modbusRetryTime = FAST_RETRY_MS;
+
+        if (cmd == moveToFloor)
+        {
+          getDir(targetFloor, &command);
+        }
+      }
+
       break;
 
     case STATE_PENDING:
@@ -1447,19 +1440,65 @@ void vOchestrator(void *pvParams)
       break;
 
     case STATE_RUNNING:
-      transit(command);
-      break;
 
-    case STATE_PAUSED:
-      // abortMotion();
-      break;
+      if (inverterState.digitalInput == INVERTER_DI_STOP)
+      {
+        xTaskNotify(xOchestratorHandle, clearCommand, eSetValueWithOverwrite);
+      }
 
-    case STATE_EMERGENCY:
-      // emergencyHandler(evtType);
-      break;
+      if (cabinState.isDoorClosed == false)
+      {
+        xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
+      }
 
-    default:
-      break;
+      if (cabinState.isEmergStop == true)
+      {
+        emoActivate();
+        abortMotion();
+        emoDeactivate();
+      }
+
+      if (vsgState.shouldStop == true)
+      {
+        xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
+      }
+
+      if (xQueueReceive(xQueueCommand, &userCommand, 0) == pdPASS)
+      {
+        commandType_t cmd = userCommand.type;
+        uint8_t targetFloor = userCommand.target;
+
+        lastCommandTime = millis();
+        modbusDelayTime = FAST_POLL_MS;
+        modbusRetryTime = FAST_RETRY_MS;
+        if (cmd == userAbort)
+        {
+          abortMotion();
+        }
+
+        transit(command);
+        break;
+
+      case STATE_PAUSED:
+
+        if (cabinState.isDoorClosed == true)
+        {
+          xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
+        }
+
+        if (vsgState.shouldStop == false)
+        {
+          xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
+        }
+        break;
+
+      case STATE_EMERGENCY:
+        // emergencyHandler(evtType);
+        break;
+
+      default:
+        break;
+      }
     }
 
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -1676,9 +1715,13 @@ void vPollingModbus(void *pvParams)
 
         if (read_success)
         {
-          inverterState.running_hz = pollingData[INVERTER_ID][0] & (1 << 0);
-          inverterState.torque = pollingData[INVERTER_ID][0] & (1 << 6);
-          inverterState.digitalInput = pollingData[INVERTER_ID][0] & (1 << 7);
+          if (xSemaphoreTake(pollingDataMutex, portMAX_DELAY) == pdTRUE)
+          {
+            inverterState.running_hz = pollingData[INVERTER_ID][0] & (1 << 0);
+            inverterState.torque = pollingData[INVERTER_ID][0] & (1 << 6);
+            inverterState.digitalInput = pollingData[INVERTER_ID][0] & (1 << 7);
+            xSemaphoreGive(pollingDataMutex);
+          }
         }
         else
         {
@@ -1705,12 +1748,16 @@ void vPollingModbus(void *pvParams)
 
         if (read_success)
         {
-          cabinState.isDoorClosed = pollingData[CABIN_ID][0] & (1 << 0);
-          cabinState.isAimUP = pollingData[CABIN_ID][0] & (1 << 1);
-          cabinState.isAimDW = pollingData[CABIN_ID][0] & (1 << 2);
-          cabinState.isUserStop = pollingData[CABIN_ID][0] & (1 << 3);
-          cabinState.isEmergStop = pollingData[CABIN_ID][0] & (1 << 4);
-          cabinState.isBusy = pollingData[CABIN_ID][0] & (1 << 5);
+          if (xSemaphoreTake(pollingDataMutex, portMAX_DELAY) == pdTRUE)
+          {
+            cabinState.isDoorClosed = pollingData[CABIN_ID][0] & (1 << 0);
+            cabinState.isAimUP = pollingData[CABIN_ID][0] & (1 << 1);
+            cabinState.isAimDW = pollingData[CABIN_ID][0] & (1 << 2);
+            cabinState.isUserStop = pollingData[CABIN_ID][0] & (1 << 3);
+            cabinState.isEmergStop = pollingData[CABIN_ID][0] & (1 << 4);
+            cabinState.isBusy = pollingData[CABIN_ID][0] & (1 << 5);
+            xSemaphoreGive(pollingDataMutex);
+          }
         }
         else
         {
@@ -1774,12 +1821,16 @@ void vPollingModbus(void *pvParams)
 
         if (read_success)
         {
-          vsgState.shouldStop = pollingData[VSG_ID][0] & (1 << 0);
-          vsgState.isAlarm[0] = pollingData[VSG_ID][0] & (1 << 1);
-          vsgState.isAlarm[1] = pollingData[VSG_ID][0] & (1 << 2);
-          vsgState.isAlarm[2] = pollingData[VSG_ID][0] & (1 << 3);
-          vsgState.isAlarm[3] = pollingData[VSG_ID][0] & (1 << 4);
-          vsgState.isAlarm[4] = pollingData[VSG_ID][0] & (1 << 5);
+          if (xSemaphoreTake(pollingDataMutex, portMAX_DELAY) == pdTRUE)
+          {
+            vsgState.shouldStop = pollingData[VSG_ID][0] & (1 << 0);
+            vsgState.isAlarm[0] = pollingData[VSG_ID][0] & (1 << 1);
+            vsgState.isAlarm[1] = pollingData[VSG_ID][0] & (1 << 2);
+            vsgState.isAlarm[2] = pollingData[VSG_ID][0] & (1 << 3);
+            vsgState.isAlarm[3] = pollingData[VSG_ID][0] & (1 << 4);
+            vsgState.isAlarm[4] = pollingData[VSG_ID][0] & (1 << 5);
+            xSemaphoreGive(pollingDataMutex);
+          }
         }
         else
         {
@@ -1798,6 +1849,7 @@ void vPollingModbus(void *pvParams)
         read_current_sta = INVERTER_STA;
         break;
       }
+      xSemaphoreGive(modbusMutex);
     }
     vTaskDelay(modbusDelayTime);
   }
@@ -1827,50 +1879,52 @@ void vWriteStation(void *pvParams)
   elevatorEvent_t evt;
 
   for (;;)
-  { 
-    if (xSemaphoreTake(modbusMutex, portMAX_DELAY) == pdTRUE) {
-    // if (xQueueReceive(xQueueWriteStation, &data, portMAX_DELAT) == pdPASS)
-    //   if (xTaskNotifyWait(0x00, 0xFFFFFFFF, &evt, portMAX_DELAT) == pdPASS)
-    //   {
+  {
+    if (xSemaphoreTake(modbusMutex, portMAX_DELAY) == pdTRUE)
+    {
+      // if (xQueueReceive(xQueueWriteStation, &data, portMAX_DELAT) == pdPASS)
+      //   if (xTaskNotifyWait(0x00, 0xFFFFFFFF, &evt, portMAX_DELAT) == pdPASS)
+      //   {
 
-    //     safetySling,
-    //         emergStop,
-    //         pauseClear,
-    //         noPowerLanding,
-    //         modbusTimeout,
-    //         clearCommand,
-    //         reachFloor1,
-    //         reachFloor2,
-    //         powerRestored
+      //     safetySling,
+      //         emergStop,
+      //         pauseClear,
+      //         noPowerLanding,
+      //         modbusTimeout,
+      //         clearCommand,
+      //         reachFloor1,
+      //         reachFloor2,
+      //         powerRestored
 
-    //         switch (evt)
-    //     {
-    //     case safetySling:
-    //       break;
+      //         switch (evt)
+      //     {
+      //     case safetySling:
+      //       break;
 
-    //     case emergStop:
-    //       uint8_t result = node.writeSingleRegister(0x0001, writeFrame[CABIN_ID][0]);
-    //       break;
+      //     case emergStop:
+      //       uint8_t result = node.writeSingleRegister(0x0001, writeFrame[CABIN_ID][0]);
+      //       break;
 
-    //     case pauseClear:
-    //       break;
+      //     case pauseClear:
+      //       break;
 
-    //     case noPowerLanding:
-    //       break;
+      //     case noPowerLanding:
+      //       break;
 
-    //   case modbusTimeout
-    //     break;
+      //   case modbusTimeout
+      //     break;
 
-    //     case clearCommand
-    //     break;
+      //     case clearCommand
+      //     break;
 
-    //   case reachFloor1
-    //   break;
+      //   case reachFloor1
+      //   break;
 
-    //   case powerRestored
+      //   case powerRestored
 
-    //   }
-    // }
+      //   }
+      // }
+      xSemaphoreGive(modbusMutex);
     }
     vTaskDelay(modbusDelayTime);
   }
@@ -2331,6 +2385,7 @@ void setup()
   // xTransitMutex = xSemaphoreCreateMutex();
   mqttMutex = xSemaphoreCreateMutex();
   modbusMutex = xSemaphoreCreateMutex();
+  pollingDataMutex = xSemaphoreCreateMutex();
   // hasChangedMutex = xSemaphoreCreateMutex();
 
   xQueueCommand = xQueueCreate(10, sizeof(userCommand_t));
