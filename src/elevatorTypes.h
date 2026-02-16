@@ -110,12 +110,18 @@ typedef struct
 
 ///////////////////////////////obj in system.///////////////////////////
 typedef struct{
+  uint16_t writtenFrame[16];
+  bool shouldWrite;
+  
   uint32_t running_hz;
   uint32_t torque;
   uint16_t digitalInput;
 } inverter_t; 
 
 typedef struct{
+  uint16_t writtenFrame[16];
+  bool shouldWrite;
+
   bool isDoorClosed;
   bool isAimUP;
   bool isAimDW;
@@ -124,7 +130,10 @@ typedef struct{
   bool isBusy;
 } cabin_t;
 
-typedef struct{
+typedef struct{ 
+ uint16_t writtenFrame[16];
+ bool shouldWrite;
+
  bool isAlarm[5];
  bool shouldStop;
 } vsg_t;

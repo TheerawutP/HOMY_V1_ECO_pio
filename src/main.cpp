@@ -72,7 +72,7 @@ Preferences preferences;
 
 SemaphoreHandle_t mqttMutex; // Mutex to protect MQTT client
 SemaphoreHandle_t modbusMutex;
-SemaphoreHandle_t pollingDataMutex;
+SemaphoreHandle_t dataMutex;
 
 QueueHandle_t xQueueCommand;
 
@@ -182,6 +182,48 @@ inline void emoActivate()
 inline void emoDeactivate()
 {
   digitalWrite(EMO, LOW);
+}
+
+void enableTransmit(bool &shouldWrite)
+{
+  shouldWrite = true;
+}
+
+void writeBit(uint16_t &value, uint8_t bit, bool state)
+{
+  if (state)
+  {
+    value |= (1 << bit); // set
+  }
+  else
+  {
+    value &= ~(1 << bit); // clear
+  }
+}
+
+void writeFrameDFPlayer(uint8_t track, uint16_t &dataframe, bool isBusy, uint8_t startDFBits)
+{
+  uint8_t track4Bit = track & 0x0F;
+
+  if (isBusy == true)
+  {
+    // write clear busy bit = true
+    writeBit(dataframe, startDFBits + 1, true);
+    // write enable dfplayer
+
+    writeBit(dataframe, startDFBits, true);
+
+    // *dataframe |= (1 << (startDFBits + 1));
+
+    // //write enable dfplayer
+    // *dataframe |= (1 << startDFBits);
+
+    // clear df 4-bit before overwrite
+    dataframe &= ~(0x0F << (startDFBits + 2));
+
+    // write num of track
+    dataframe |= (track4Bit << (startDFBits + 2));
+  }
 }
 
 // main helpers
@@ -1184,6 +1226,8 @@ void getDir(uint8_t target, transitCommand_t *cmd)
   {
     direction_t newDir = (target > elevator.pos) ? DIR_UP : DIR_DOWN;
     uint8_t newTarget = target;
+    uint8_t trackNum = 0;
+    uint8_t dirBit = 0;
 
     cmd->dir = newDir;
     cmd->target = newTarget;
@@ -1199,6 +1243,25 @@ void getDir(uint8_t target, transitCommand_t *cmd)
                                   .dir = newDir,
                                   .target = newTarget,
                                   .lastTarget = newTarget});
+
+    if (newDir == DIR_UP)
+    {
+      trackNum = 1;
+      dirBit = 1;
+    }
+    else
+    {
+      trackNum = 2;
+      dirBit = 2;
+    }
+
+    if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+    {
+      writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+      enableTransmit(cabinState.shouldWrite);
+      writeBit(cabinState.writtenFrame[1], dirBit, true);
+      xSemaphoreGive(dataMutex);
+    }
   }
   else
   {
@@ -1206,6 +1269,8 @@ void getDir(uint8_t target, transitCommand_t *cmd)
     {
       direction_t newDir = DIR_NONE;
       uint8_t newTarget = target;
+      uint8_t trackNum = 0;
+      uint8_t dirBit = 0;
 
       if (elevator.lastTarget > elevator.pos)
         newDir = DIR_DOWN;
@@ -1224,6 +1289,25 @@ void getDir(uint8_t target, transitCommand_t *cmd)
                                     .state = STATE_PENDING,
                                     .dir = newDir,
                                     .target = newTarget});
+
+      if (newDir == DIR_UP)
+      {
+        trackNum = 1;
+        dirBit = 1;
+      }
+      else
+      {
+        trackNum = 2;
+        dirBit = 2;
+      }
+
+      if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+      {
+        writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+        enableTransmit(cabinState.shouldWrite);
+        writeBit(cabinState.writtenFrame[1], dirBit, true);
+        xSemaphoreGive(dataMutex);
+      }
     }
     else
     {
@@ -1348,8 +1432,25 @@ void vOchestrator(void *pvParams)
 
   uint32_t lastCommandTime = 0;
 
+  inverter_t localInvState;
+  cabin_t localCabinState;
+  vsg_t localVsgState;
+
+  memset(&localInvState, 0, sizeof(inverter_t));
+  memset(&localCabinState, 0, sizeof(cabin_t));
+  memset(&localVsgState, 0, sizeof(vsg_t));
+
   for (;;)
   {
+
+    if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+    {
+      localInvState = inverterState;
+      localCabinState = cabinState;
+      localVsgState = vsgState;
+
+      xSemaphoreGive(dataMutex);
+    }
 
     ////////////////////////////listen to all event that would happens///////////////////////////////////
 
@@ -1490,6 +1591,7 @@ void vOchestrator(void *pvParams)
         {
           xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
         }
+
         break;
 
       case STATE_EMERGENCY:
@@ -1715,12 +1817,12 @@ void vPollingModbus(void *pvParams)
 
         if (read_success)
         {
-          if (xSemaphoreTake(pollingDataMutex, portMAX_DELAY) == pdTRUE)
+          if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
           {
             inverterState.running_hz = pollingData[INVERTER_ID][0] & (1 << 0);
             inverterState.torque = pollingData[INVERTER_ID][0] & (1 << 6);
             inverterState.digitalInput = pollingData[INVERTER_ID][0] & (1 << 7);
-            xSemaphoreGive(pollingDataMutex);
+            xSemaphoreGive(dataMutex);
           }
         }
         else
@@ -1748,7 +1850,7 @@ void vPollingModbus(void *pvParams)
 
         if (read_success)
         {
-          if (xSemaphoreTake(pollingDataMutex, portMAX_DELAY) == pdTRUE)
+          if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
           {
             cabinState.isDoorClosed = pollingData[CABIN_ID][0] & (1 << 0);
             cabinState.isAimUP = pollingData[CABIN_ID][0] & (1 << 1);
@@ -1756,7 +1858,7 @@ void vPollingModbus(void *pvParams)
             cabinState.isUserStop = pollingData[CABIN_ID][0] & (1 << 3);
             cabinState.isEmergStop = pollingData[CABIN_ID][0] & (1 << 4);
             cabinState.isBusy = pollingData[CABIN_ID][0] & (1 << 5);
-            xSemaphoreGive(pollingDataMutex);
+            xSemaphoreGive(dataMutex);
           }
         }
         else
@@ -1821,7 +1923,7 @@ void vPollingModbus(void *pvParams)
 
         if (read_success)
         {
-          if (xSemaphoreTake(pollingDataMutex, portMAX_DELAY) == pdTRUE)
+          if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
           {
             vsgState.shouldStop = pollingData[VSG_ID][0] & (1 << 0);
             vsgState.isAlarm[0] = pollingData[VSG_ID][0] & (1 << 1);
@@ -1829,7 +1931,7 @@ void vPollingModbus(void *pvParams)
             vsgState.isAlarm[2] = pollingData[VSG_ID][0] & (1 << 3);
             vsgState.isAlarm[3] = pollingData[VSG_ID][0] & (1 << 4);
             vsgState.isAlarm[4] = pollingData[VSG_ID][0] & (1 << 5);
-            xSemaphoreGive(pollingDataMutex);
+            xSemaphoreGive(dataMutex);
           }
         }
         else
@@ -1882,48 +1984,9 @@ void vWriteStation(void *pvParams)
   {
     if (xSemaphoreTake(modbusMutex, portMAX_DELAY) == pdTRUE)
     {
-      // if (xQueueReceive(xQueueWriteStation, &data, portMAX_DELAT) == pdPASS)
-      //   if (xTaskNotifyWait(0x00, 0xFFFFFFFF, &evt, portMAX_DELAT) == pdPASS)
-      //   {
-
-      //     safetySling,
-      //         emergStop,
-      //         pauseClear,
-      //         noPowerLanding,
-      //         modbusTimeout,
-      //         clearCommand,
-      //         reachFloor1,
-      //         reachFloor2,
-      //         powerRestored
-
-      //         switch (evt)
-      //     {
-      //     case safetySling:
-      //       break;
-
-      //     case emergStop:
-      //       uint8_t result = node.writeSingleRegister(0x0001, writeFrame[CABIN_ID][0]);
-      //       break;
-
-      //     case pauseClear:
-      //       break;
-
-      //     case noPowerLanding:
-      //       break;
-
-      //   case modbusTimeout
-      //     break;
-
-      //     case clearCommand
-      //     break;
-
-      //   case reachFloor1
-      //   break;
-
-      //   case powerRestored
-
-      //   }
-      // }
+      if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+      {
+      }
       xSemaphoreGive(modbusMutex);
     }
     vTaskDelay(modbusDelayTime);
@@ -2385,7 +2448,7 @@ void setup()
   // xTransitMutex = xSemaphoreCreateMutex();
   mqttMutex = xSemaphoreCreateMutex();
   modbusMutex = xSemaphoreCreateMutex();
-  pollingDataMutex = xSemaphoreCreateMutex();
+  dataMutex = xSemaphoreCreateMutex();
   // hasChangedMutex = xSemaphoreCreateMutex();
 
   xQueueCommand = xQueueCreate(10, sizeof(userCommand_t));
