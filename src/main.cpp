@@ -70,6 +70,7 @@ RCSwitch RF = RCSwitch();
 Preferences preferences;
 
 SemaphoreHandle_t mqttMutex; // Mutex to protect MQTT client
+SemaphoreHandle_t modbusMutex;
 
 QueueHandle_t xQueueCommand;
 
@@ -1654,146 +1655,149 @@ void vPollingModbus(void *pvParams)
     bool read_success = false;
     uint8_t retry_i = 0;
 
-    switch (read_current_sta)
+    if (xSemaphoreTake(modbusMutex, portMAX_DELAY) == pdTRUE)
     {
-    // -----------------------------------------------------------
-    // CASE 1: INVERTER
-    // -----------------------------------------------------------
-    case INVERTER_STA:
-      read_success = false;
-      for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
+      switch (read_current_sta)
       {
-        if (readDataFrom(INVERTER_ID, FIRST_REG_INVERTER, NUM_READ_INVERTER, pollingData[INVERTER_ID]))
+      // -----------------------------------------------------------
+      // CASE 1: INVERTER
+      // -----------------------------------------------------------
+      case INVERTER_STA:
+        read_success = false;
+        for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
         {
-          read_success = true;
-          break;
+          if (readDataFrom(INVERTER_ID, FIRST_REG_INVERTER, NUM_READ_INVERTER, pollingData[INVERTER_ID]))
+          {
+            read_success = true;
+            break;
+          }
+          vTaskDelay(modbusRetryTime);
         }
-        vTaskDelay(modbusRetryTime);
-      }
 
-      if (read_success)
-      {
-        inverterState.running_hz = pollingData[INVERTER_ID][0] & (1 << 0);
-        inverterState.torque = pollingData[INVERTER_ID][0] & (1 << 6);
-        inverterState.digitalInput = pollingData[INVERTER_ID][0] & (1 << 7);
-      }
-      else
-      {
-        xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
-        is_inverter_safe = false;
-      }
-      read_current_sta = CABIN_STA;
-      break;
-
-    // -----------------------------------------------------------
-    // CASE 2: CABIN
-    // -----------------------------------------------------------
-    case CABIN_STA:
-      read_success = false;
-      for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
-      {
-        if (readDataFrom(CABIN_ID, FIRST_REG_CABIN, NUM_READ_CABIN, pollingData[CABIN_ID]))
+        if (read_success)
         {
-          read_success = true;
-          break;
+          inverterState.running_hz = pollingData[INVERTER_ID][0] & (1 << 0);
+          inverterState.torque = pollingData[INVERTER_ID][0] & (1 << 6);
+          inverterState.digitalInput = pollingData[INVERTER_ID][0] & (1 << 7);
         }
-        vTaskDelay(modbusRetryTime);
-      }
-
-      if (read_success)
-      {
-        cabinState.isDoorClosed = pollingData[CABIN_ID][0] & (1 << 0);
-        cabinState.isAimUP = pollingData[CABIN_ID][0] & (1 << 1);
-        cabinState.isAimDW = pollingData[CABIN_ID][0] & (1 << 2);
-        cabinState.isUserStop = pollingData[CABIN_ID][0] & (1 << 3);
-        cabinState.isEmergStop = pollingData[CABIN_ID][0] & (1 << 4);
-        cabinState.isBusy = pollingData[CABIN_ID][0] & (1 << 5);
-      }
-      else
-      {
-        xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
-        is_cabin_safe = false;
-      }
-
-      read_current_sta = HALL_2_STA;
-      break;
-
-    // -----------------------------------------------------------
-    // CASE 3: HALL 2
-    // -----------------------------------------------------------
-    case HALL_2_STA:
-      // read_success = false;
-      // for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
-      // {
-      //   if (readDataFrom(HALL_2_ID, FIRST_REG_HALL, NUM_READ_HALL, pollingData[HALL_2_ID]))
-      //   {
-      //     read_success = true;
-      //     break;
-      //   }
-      //   vTaskDelay(pdMS_TO_TICKS(10));
-      // }
-
-      // if (read_success)
-      // {
-      //   if (pollingData[HALL_2_ID][0] == 1)
-      //   {
-      //     is_hall2_safe = false;
-      //     xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-      //   }
-      //   else
-      //   {
-      //     is_hall2_safe = true;
-      //   }
-      // }
-      // else
-      // {
-      //   // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
-      //   is_hall2_safe = false;
-      // }
-
-      read_current_sta = VSG_STA;
-      break;
-
-    // -----------------------------------------------------------
-    // CASE 4: VSG
-    // -----------------------------------------------------------
-    case VSG_STA:
-      read_success = false;
-      for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
-      {
-        if (readDataFrom(VSG_ID, FIRST_REG_VSG, NUM_READ_VSG, pollingData[VSG_ID]))
+        else
         {
-          read_success = true;
-          break;
+          xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+          is_inverter_safe = false;
         }
-        vTaskDelay(modbusRetryTime);
-      }
+        read_current_sta = CABIN_STA;
+        break;
 
-      if (read_success)
-      {
-        vsgState.shouldStop = pollingData[VSG_ID][0] & (1 << 0);
-        vsgState.isAlarm[0] = pollingData[VSG_ID][0] & (1 << 1);
-        vsgState.isAlarm[1] = pollingData[VSG_ID][0] & (1 << 2);
-        vsgState.isAlarm[2] = pollingData[VSG_ID][0] & (1 << 3);
-        vsgState.isAlarm[3] = pollingData[VSG_ID][0] & (1 << 4);
-        vsgState.isAlarm[4] = pollingData[VSG_ID][0] & (1 << 5);
-      }
-      else
-      {
-        xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
-        is_vsg_safe = false;
-      }
-
-      if (elevator.state == STATE_PAUSED)
-      {
-        if (is_inverter_safe && is_cabin_safe && is_vsg_safe)
+      // -----------------------------------------------------------
+      // CASE 2: CABIN
+      // -----------------------------------------------------------
+      case CABIN_STA:
+        read_success = false;
+        for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
         {
-          xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
+          if (readDataFrom(CABIN_ID, FIRST_REG_CABIN, NUM_READ_CABIN, pollingData[CABIN_ID]))
+          {
+            read_success = true;
+            break;
+          }
+          vTaskDelay(modbusRetryTime);
         }
-      }
 
-      read_current_sta = INVERTER_STA;
-      break;
+        if (read_success)
+        {
+          cabinState.isDoorClosed = pollingData[CABIN_ID][0] & (1 << 0);
+          cabinState.isAimUP = pollingData[CABIN_ID][0] & (1 << 1);
+          cabinState.isAimDW = pollingData[CABIN_ID][0] & (1 << 2);
+          cabinState.isUserStop = pollingData[CABIN_ID][0] & (1 << 3);
+          cabinState.isEmergStop = pollingData[CABIN_ID][0] & (1 << 4);
+          cabinState.isBusy = pollingData[CABIN_ID][0] & (1 << 5);
+        }
+        else
+        {
+          xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+          is_cabin_safe = false;
+        }
+
+        read_current_sta = HALL_2_STA;
+        break;
+
+      // -----------------------------------------------------------
+      // CASE 3: HALL 2
+      // -----------------------------------------------------------
+      case HALL_2_STA:
+        // read_success = false;
+        // for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
+        // {
+        //   if (readDataFrom(HALL_2_ID, FIRST_REG_HALL, NUM_READ_HALL, pollingData[HALL_2_ID]))
+        //   {
+        //     read_success = true;
+        //     break;
+        //   }
+        //   vTaskDelay(pdMS_TO_TICKS(10));
+        // }
+
+        // if (read_success)
+        // {
+        //   if (pollingData[HALL_2_ID][0] == 1)
+        //   {
+        //     is_hall2_safe = false;
+        //     xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
+        //   }
+        //   else
+        //   {
+        //     is_hall2_safe = true;
+        //   }
+        // }
+        // else
+        // {
+        //   // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+        //   is_hall2_safe = false;
+        // }
+
+        read_current_sta = VSG_STA;
+        break;
+
+      // -----------------------------------------------------------
+      // CASE 4: VSG
+      // -----------------------------------------------------------
+      case VSG_STA:
+        read_success = false;
+        for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
+        {
+          if (readDataFrom(VSG_ID, FIRST_REG_VSG, NUM_READ_VSG, pollingData[VSG_ID]))
+          {
+            read_success = true;
+            break;
+          }
+          vTaskDelay(modbusRetryTime);
+        }
+
+        if (read_success)
+        {
+          vsgState.shouldStop = pollingData[VSG_ID][0] & (1 << 0);
+          vsgState.isAlarm[0] = pollingData[VSG_ID][0] & (1 << 1);
+          vsgState.isAlarm[1] = pollingData[VSG_ID][0] & (1 << 2);
+          vsgState.isAlarm[2] = pollingData[VSG_ID][0] & (1 << 3);
+          vsgState.isAlarm[3] = pollingData[VSG_ID][0] & (1 << 4);
+          vsgState.isAlarm[4] = pollingData[VSG_ID][0] & (1 << 5);
+        }
+        else
+        {
+          xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+          is_vsg_safe = false;
+        }
+
+        if (elevator.state == STATE_PAUSED)
+        {
+          if (is_inverter_safe && is_cabin_safe && is_vsg_safe)
+          {
+            xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
+          }
+        }
+
+        read_current_sta = INVERTER_STA;
+        break;
+      }
     }
     vTaskDelay(modbusDelayTime);
   }
@@ -1823,7 +1827,8 @@ void vWriteStation(void *pvParams)
   elevatorEvent_t evt;
 
   for (;;)
-  {
+  { 
+    if (xSemaphoreTake(modbusMutex, portMAX_DELAY) == pdTRUE) {
     // if (xQueueReceive(xQueueWriteStation, &data, portMAX_DELAT) == pdPASS)
     //   if (xTaskNotifyWait(0x00, 0xFFFFFFFF, &evt, portMAX_DELAT) == pdPASS)
     //   {
@@ -1866,6 +1871,7 @@ void vWriteStation(void *pvParams)
 
     //   }
     // }
+    }
     vTaskDelay(modbusDelayTime);
   }
 }
@@ -2324,6 +2330,7 @@ void setup()
 
   // xTransitMutex = xSemaphoreCreateMutex();
   mqttMutex = xSemaphoreCreateMutex();
+  modbusMutex = xSemaphoreCreateMutex();
   // hasChangedMutex = xSemaphoreCreateMutex();
 
   xQueueCommand = xQueueCreate(10, sizeof(userCommand_t));
