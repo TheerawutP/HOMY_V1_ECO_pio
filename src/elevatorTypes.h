@@ -112,8 +112,8 @@ typedef struct
 typedef struct{
   uint32_t running_hz;
   uint32_t torque;
-  uint16_t inputState;
-} inveter_t; 
+  uint16_t digitalInput;
+} inverter_t; 
 
 typedef struct{
   bool isDoorClosed;

@@ -84,7 +84,7 @@ TaskHandle_t xEmergeStopHandle;
 TaskHandle_t xNoPowerLandingHandle;
 TaskHandle_t xModbusTimeoutHandle;
 TaskHandle_t xClearCommandHandle;
-
+TaskHandle_t xWriteStationHandle;
 TimerHandle_t xStartRunningTimer;
 
 AsyncWebServer server(80);
@@ -110,7 +110,27 @@ status_t elevator = {
     .btwFloor = false,
     .hasChanged = false};
 
-modbusStation_t currentStation = INVERTER_STA;
+modbusStation_t read_current_sta = INVERTER_STA;
+modbusStation_t write_current_sta = INVERTER_STA;
+
+volatile uint16_t writeFrame[5][16]; // slave id, write reg
+
+cabin_t cabinState = {
+    .isDoorClosed = false,
+    .isAimUP = false,
+    .isAimDW = false,
+    .isUserStop = false,
+    .isEmergStop = false,
+    .isBusy = false};
+
+inverter_t inverterState = {
+    .running_hz = 0,
+    .torque = 0,
+    .digitalInput = 0};
+
+vsg_t vsgState = {
+    .isAlarm = false,
+    .shouldStop = false};
 
 // while sleep param
 
@@ -1306,7 +1326,7 @@ bool readDataFrom(uint8_t slaveID, uint16_t startAddress, uint8_t numRead, uint1
 
 // central state manager
 
-void vOchestrator(void *pvParameters)
+void vOchestrator(void *pvParams)
 {
 
   uint32_t ulNotificationValue;
@@ -1535,23 +1555,21 @@ void vRFReceiver(void *pvParams)
 // timer callbacks
 void vStartRunning(TimerHandle_t xTimer)
 {
-  if (elevator.state == STATE_PENDING) 
+  if (elevator.state == STATE_PENDING)
   {
-    if (elevator.dir != DIR_NONE && elevator.target != 0) 
+    if (elevator.dir != DIR_NONE && elevator.target != 0)
     {
-       Serial.println(">> Timer Done: Valid Direction -> GO RUNNING!");
-       updateElevator(&elevator, (update_status_t){
-          .set = {.state = true},
-          .state = STATE_RUNNING
-       });
+      Serial.println(">> Timer Done: Valid Direction -> GO RUNNING!");
+      updateElevator(&elevator, (update_status_t){
+                                    .set = {.state = true},
+                                    .state = STATE_RUNNING});
     }
-    else 
+    else
     {
-       Serial.println(">> Timer Done: No Direction -> GO IDLE");
-       updateElevator(&elevator, (update_status_t){
-          .set = {.state = true},
-          .state = STATE_IDLE
-       });
+      Serial.println(">> Timer Done: No Direction -> GO IDLE");
+      updateElevator(&elevator, (update_status_t){
+                                    .set = {.state = true},
+                                    .state = STATE_IDLE});
     }
   }
 }
@@ -1582,7 +1600,7 @@ void vStartRunning(TimerHandle_t xTimer)
 //   for (;;)
 //   {
 
-//     switch (currentStation)
+//     switch (read_current_sta)
 //     {
 
 //     case CABIN_STA:
@@ -1596,7 +1614,7 @@ void vStartRunning(TimerHandle_t xTimer)
 //           Serial.println("down");
 //       }
 
-//       currentStation = CABIN_STA;
+//       read_current_sta = CABIN_STA;
 //       break;
 
 //     }
@@ -1617,26 +1635,26 @@ void vPollingModbus(void *pvParams)
   uint16_t FIRST_REG_VSG = 0;
 
   uint16_t NUM_READ_INVERTER = 10;
-  uint16_t NUM_READ_CABIN = 2;
-  uint16_t NUM_READ_HALL = 2;
-  uint16_t NUM_READ_VSG = 2;
+  uint16_t NUM_READ_CABIN = 1;
+  uint16_t NUM_READ_HALL = 1;
+  uint16_t NUM_READ_VSG = 1;
 
   uint16_t pollingData[5][32];
-  memset(pollingData, 0, sizeof(pollingData));
+  // memset(pollingData, 0, sizeof(pollingData));
 
   const uint8_t MAX_RETRIES = 3;
 
-  bool inv_safe = true;
-  bool cabin_safe = true;
-  bool hall2_safe = true;
-  bool vsg_safe = true;
+  bool is_inverter_safe = true;
+  bool is_cabin_safe = true;
+  bool is_hall2_safe = true;
+  bool is_vsg_safe = true;
 
   for (;;)
   {
     bool read_success = false;
     uint8_t retry_i = 0;
 
-    switch (currentStation)
+    switch (read_current_sta)
     {
     // -----------------------------------------------------------
     // CASE 1: INVERTER
@@ -1655,27 +1673,16 @@ void vPollingModbus(void *pvParams)
 
       if (read_success)
       {
-        if (pollingData[INVERTER_ID][7] == 992)
-        {
-          xTaskNotify(xOchestratorHandle, clearCommand, eSetValueWithOverwrite);
-        }
-
-        if (pollingData[INVERTER_ID][6] > TORQUE_RATED)
-        {
-          inv_safe = false;
-          xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-        }
-        else
-        {
-          inv_safe = true;
-        }
+        inverterState.running_hz = pollingData[INVERTER_ID][0] & (1 << 0);
+        inverterState.torque = pollingData[INVERTER_ID][0] & (1 << 6);
+        inverterState.digitalInput = pollingData[INVERTER_ID][0] & (1 << 7);
       }
       else
       {
-        // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
-        inv_safe = false;
+        xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+        is_inverter_safe = false;
       }
-      currentStation = CABIN_STA;
+      read_current_sta = CABIN_STA;
       break;
 
     // -----------------------------------------------------------
@@ -1695,28 +1702,20 @@ void vPollingModbus(void *pvParams)
 
       if (read_success)
       {
-        if (pollingData[CABIN_ID][0] == 1)
-        {
-          cabin_safe = false;
-          xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-        }
-        else
-        {
-          cabin_safe = true;
-        }
-
-        // if (pollingData[CABIN_ID][1] == 1)
-        // {
-        //   xTaskNotify(xOchestratorHandle, safetySling, eSetValueWithOverwrite);
-        // }
+        cabinState.isDoorClosed = pollingData[CABIN_ID][0] & (1 << 0);
+        cabinState.isAimUP = pollingData[CABIN_ID][0] & (1 << 1);
+        cabinState.isAimDW = pollingData[CABIN_ID][0] & (1 << 2);
+        cabinState.isUserStop = pollingData[CABIN_ID][0] & (1 << 3);
+        cabinState.isEmergStop = pollingData[CABIN_ID][0] & (1 << 4);
+        cabinState.isBusy = pollingData[CABIN_ID][0] & (1 << 5);
       }
       else
       {
         xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
-        cabin_safe = false;
+        is_cabin_safe = false;
       }
 
-      currentStation = HALL_2_STA;
+      read_current_sta = HALL_2_STA;
       break;
 
     // -----------------------------------------------------------
@@ -1738,21 +1737,21 @@ void vPollingModbus(void *pvParams)
       // {
       //   if (pollingData[HALL_2_ID][0] == 1)
       //   {
-      //     hall2_safe = false;
+      //     is_hall2_safe = false;
       //     xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
       //   }
       //   else
       //   {
-      //     hall2_safe = true;
+      //     is_hall2_safe = true;
       //   }
       // }
       // else
       // {
       //   // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
-      //   hall2_safe = false;
+      //   is_hall2_safe = false;
       // }
 
-      currentStation = VSG_STA;
+      read_current_sta = VSG_STA;
       break;
 
     // -----------------------------------------------------------
@@ -1772,33 +1771,101 @@ void vPollingModbus(void *pvParams)
 
       if (read_success)
       {
-        if (pollingData[VSG_ID][0] == 1)
-        {
-          vsg_safe = false;
-          xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-        }
-        else
-        {
-          vsg_safe = true;
-        }
+        vsgState.shouldStop = pollingData[VSG_ID][0] & (1 << 0);
+        vsgState.isAlarm[0] = pollingData[VSG_ID][0] & (1 << 1);
+        vsgState.isAlarm[1] = pollingData[VSG_ID][0] & (1 << 2);
+        vsgState.isAlarm[2] = pollingData[VSG_ID][0] & (1 << 3);
+        vsgState.isAlarm[3] = pollingData[VSG_ID][0] & (1 << 4);
+        vsgState.isAlarm[4] = pollingData[VSG_ID][0] & (1 << 5);
       }
       else
       {
         xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
-        vsg_safe = false;
+        is_vsg_safe = false;
       }
 
       if (elevator.state == STATE_PAUSED)
       {
-        if (inv_safe && cabin_safe && vsg_safe)
+        if (is_inverter_safe && is_cabin_safe && is_vsg_safe)
         {
           xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
         }
       }
 
-      currentStation = INVERTER_STA;
+      read_current_sta = INVERTER_STA;
       break;
     }
+    vTaskDelay(modbusDelayTime);
+  }
+}
+
+void vWriteStation(void *pvParams)
+{
+  uint8_t INVERTER_ID = 1;
+  uint8_t CABIN_ID = 2;
+  uint8_t HALL_2_ID = 3;
+  uint8_t VSG_ID = 4;
+
+  uint16_t FIRST_REG_INVERTER = 28672;
+  uint16_t FIRST_REG_CABIN = 1;
+  uint16_t FIRST_REG_HALL = 1;
+  uint16_t FIRST_REG_VSG = 1;
+
+  uint16_t NUM_READ_INVERTER = 10;
+  uint16_t NUM_READ_CABIN = 1;
+  uint16_t NUM_READ_HALL = 1;
+  uint16_t NUM_READ_VSG = 1;
+
+  bool is_inverter_safe = true;
+  bool is_cabin_safe = true;
+  bool is_hall2_safe = true;
+  bool is_vsg_safe = true;
+  elevatorEvent_t evt;
+
+  for (;;)
+  {
+    // if (xQueueReceive(xQueueWriteStation, &data, portMAX_DELAT) == pdPASS)
+    //   if (xTaskNotifyWait(0x00, 0xFFFFFFFF, &evt, portMAX_DELAT) == pdPASS)
+    //   {
+
+    //     safetySling,
+    //         emergStop,
+    //         pauseClear,
+    //         noPowerLanding,
+    //         modbusTimeout,
+    //         clearCommand,
+    //         reachFloor1,
+    //         reachFloor2,
+    //         powerRestored
+
+    //         switch (evt)
+    //     {
+    //     case safetySling:
+    //       break;
+
+    //     case emergStop:
+    //       uint8_t result = node.writeSingleRegister(0x0001, writeFrame[CABIN_ID][0]);
+    //       break;
+
+    //     case pauseClear:
+    //       break;
+
+    //     case noPowerLanding:
+    //       break;
+
+    //   case modbusTimeout
+    //     break;
+
+    //     case clearCommand
+    //     break;
+
+    //   case reachFloor1
+    //   break;
+
+    //   case powerRestored
+
+    //   }
+    // }
     vTaskDelay(modbusDelayTime);
   }
 }
@@ -2274,6 +2341,8 @@ void setup()
   xTaskCreate(vClearCommand, "ClearCommand", 1536, NULL, 4, &xClearCommandHandle);
 
   xTaskCreate(vPollingModbus, "PollingModbus", 3072, NULL, 4, &xPollingModbusHandle);
+  xTaskCreate(vWriteStation, "WriteStation", 3072, NULL, 4, &xWriteStationHandle);
+
   xTaskCreate(vPollingFloorSensor1, "PollingFloorSensor", 2048, NULL, 4, &xPollingFloorSensor1Handle);
   xTaskCreate(vPollingFloorSensor2, "PollingFloorSensor2", 2048, NULL, 4, &xPollingFloorSensor2Handle);
   xTaskCreate(vPollingNoPower, "PollingNoPower", 2048, NULL, 4, &xPollingNoPowerHandle);
