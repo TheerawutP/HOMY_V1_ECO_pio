@@ -1253,13 +1253,14 @@ void getDir(uint8_t target, transitCommand_t *cmd)
       dirBit = 2;
     }
 
-    if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
-    {
+    // if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+    // {
+      
       writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
       enableTransmit(cabinState.shouldWrite);
       writeBit(cabinState.writtenFrame[1], dirBit, true);
       xSemaphoreGive(dataMutex);
-    }
+    // }
   }
   else
   {
@@ -1299,13 +1300,13 @@ void getDir(uint8_t target, transitCommand_t *cmd)
         dirBit = 2;
       }
 
-      if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
-      {
+      // if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+      // {
         writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
         enableTransmit(cabinState.shouldWrite);
         writeBit(cabinState.writtenFrame[1], dirBit, true);
         xSemaphoreGive(dataMutex);
-      }
+      // }
     }
     else
     {
@@ -1793,7 +1794,7 @@ void vPollingModbus(void *pvParams)
     bool read_success = false;
     uint8_t retry_i = 0;
 
-    if (xSemaphoreTake(modbusMutex, portMAX_DELAY) == pdTRUE)
+    if (xSemaphoreTake(modbusMutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
       switch (read_current_sta)
       {
@@ -1814,7 +1815,7 @@ void vPollingModbus(void *pvParams)
 
         if (read_success)
         {
-          if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
           {
             inverterState.running_hz = pollingData[INVERTER_ID][0] & (1 << 0);
             inverterState.torque = pollingData[INVERTER_ID][0] & (1 << 6);
@@ -1847,7 +1848,7 @@ void vPollingModbus(void *pvParams)
 
         if (read_success)
         {
-          if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
           {
             cabinState.isDoorClosed = pollingData[CABIN_ID][0] & (1 << 0);
             cabinState.isAimUP = pollingData[CABIN_ID][0] & (1 << 1);
@@ -1920,7 +1921,7 @@ void vPollingModbus(void *pvParams)
 
         if (read_success)
         {
-          if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
           {
             vsgState.shouldPause = pollingData[VSG_ID][0] & (1 << 0);
             vsgState.isAlarm[0] = pollingData[VSG_ID][0] & (1 << 1);
@@ -2005,7 +2006,7 @@ void vWriteStation(void *pvParams)
       }
     }
 
-    vTaskDelay(modbusDelayTime);
+    vTaskDelay(50);
   }
 }
 
