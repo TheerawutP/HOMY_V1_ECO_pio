@@ -1541,29 +1541,30 @@ void vOchestrator(void *pvParams)
       break;
 
     case STATE_RUNNING:
+      
       transit(command);
 
-      if (inverterState.digitalInput == INVERTER_DI_STOP)
-      {
-        xTaskNotify(xOchestratorHandle, clearCommand, eSetValueWithOverwrite);
-      }
+      // if (inverterState.digitalInput == INVERTER_DI_STOP)
+      // {
+      //   xTaskNotify(xOchestratorHandle, clearCommand, eSetValueWithOverwrite);
+      // }
 
-      if (cabinState.isDoorClosed == false)
-      {
-        xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-      }
+      // if (cabinState.isDoorClosed == false)
+      // {
+      //   xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
+      // }
 
-      if (cabinState.isEmergStop == true)
-      {
-        emoActivate();
-        abortMotion();
-        emoDeactivate();
-      }
+      // if (cabinState.isEmergStop == true)
+      // {
+      //   emoActivate();
+      //   abortMotion();
+      //   emoDeactivate();
+      // }
 
-      if (vsgState.shouldPause == true)
-      {
-        xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-      }
+      // if (vsgState.shouldPause == true)
+      // {
+      //   xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
+      // }
 
       if (xQueueReceive(xQueueCommand, &userCommand, 0) == pdPASS)
       {
@@ -2118,6 +2119,7 @@ void vPollingFloorSensor1(void *pvParams) // first floor sensor
 {
   uint8_t floorSensor1_counter = 0;
   const uint8_t STABLE_THRESHOLD = 20;
+  bool hasNotified = false;
 
   for (;;)
   {
@@ -2130,13 +2132,15 @@ void vPollingFloorSensor1(void *pvParams) // first floor sensor
     else
     {
       floorSensor1_counter = 0;
+      hasNotified = false;
     }
 
     bool isAtFloor1 = (floorSensor1_counter >= STABLE_THRESHOLD);
 
-    if (isAtFloor1 == true)
+    if (isAtFloor1 == true && hasNotified == false)
     {
       xTaskNotify(xOchestratorHandle, reachFloor1, eSetValueWithOverwrite);
+      hasNotified = true;
     }
     vTaskDelay(pdMS_TO_TICKS(20));
   }
@@ -2146,6 +2150,8 @@ void vPollingFloorSensor2(void *pvParams) // first floor sensor
 {
   uint8_t floorSensor2_counter = 0;
   const uint8_t STABLE_THRESHOLD = 20;
+  bool hasNotified = false;
+
 
   for (;;)
   {
@@ -2158,13 +2164,15 @@ void vPollingFloorSensor2(void *pvParams) // first floor sensor
     else
     {
       floorSensor2_counter = 0;
+      hasNotified = false;
     }
 
     bool isAtFloor2 = (floorSensor2_counter >= STABLE_THRESHOLD);
 
-    if (isAtFloor2 == true)
+    if (isAtFloor2 == true && hasNotified == false)
     {
       xTaskNotify(xOchestratorHandle, reachFloor2, eSetValueWithOverwrite);
+      hasNotified = true;
     }
     vTaskDelay(pdMS_TO_TICKS(20));
   }
