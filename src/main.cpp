@@ -87,6 +87,7 @@ TaskHandle_t xEmergeStopHandle;
 TaskHandle_t xNoPowerLandingHandle;
 TaskHandle_t xModbusTimeoutHandle;
 TaskHandle_t xClearCommandHandle;
+TaskHandle_t xModbusMasterHandle;
 TaskHandle_t xWriteStationHandle;
 TimerHandle_t xStartRunningTimer;
 
@@ -1253,14 +1254,14 @@ void getDir(uint8_t target, transitCommand_t *cmd)
       dirBit = 2;
     }
 
-    // if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
-    // {
-      
-      writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
-      enableTransmit(cabinState.shouldWrite);
-      writeBit(cabinState.writtenFrame[1], dirBit, true);
-      xSemaphoreGive(dataMutex);
-    // }
+    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+    {
+
+    writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+    enableTransmit(cabinState.shouldWrite);
+    writeBit(cabinState.writtenFrame[1], dirBit, true);
+    xSemaphoreGive(dataMutex);
+    }
   }
   else
   {
@@ -1300,13 +1301,13 @@ void getDir(uint8_t target, transitCommand_t *cmd)
         dirBit = 2;
       }
 
-      // if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
-      // {
-        writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
-        enableTransmit(cabinState.shouldWrite);
-        writeBit(cabinState.writtenFrame[1], dirBit, true);
-        xSemaphoreGive(dataMutex);
-      // }
+      if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+      {
+      writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+      enableTransmit(cabinState.shouldWrite);
+      writeBit(cabinState.writtenFrame[1], dirBit, true);
+      xSemaphoreGive(dataMutex);
+      }
     }
     else
     {
@@ -1431,25 +1432,25 @@ void vOchestrator(void *pvParams)
 
   uint32_t lastCommandTime = 0;
 
-  inverter_t localInvState;
-  cabin_t localCabinState;
-  vsg_t localVsgState;
+  // inverter_t localInvState;
+  // cabin_t localCabinState;
+  // vsg_t localVsgState;
 
-  memset(&localInvState, 0, sizeof(inverter_t));
-  memset(&localCabinState, 0, sizeof(cabin_t));
-  memset(&localVsgState, 0, sizeof(vsg_t));
+  // memset(&localInvState, 0, sizeof(inverter_t));
+  // memset(&localCabinState, 0, sizeof(cabin_t));
+  // memset(&localVsgState, 0, sizeof(vsg_t));
 
   for (;;)
   {
 
-    if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
-    {
-      localInvState = inverterState;
-      localCabinState = cabinState;
-      localVsgState = vsgState;
+    // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+    // {
+    //   localInvState = inverterState;
+    //   localCabinState = cabinState;
+    //   localVsgState = vsgState;
 
-      xSemaphoreGive(dataMutex);
-    }
+    //   xSemaphoreGive(dataMutex);
+    // }
 
     ////////////////////////////listen to all event that would happens///////////////////////////////////
 
@@ -1601,7 +1602,7 @@ void vOchestrator(void *pvParams)
       break;
     }
 
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
 
@@ -1762,200 +1763,255 @@ void vStartRunning(TimerHandle_t xTimer)
 //   }
 // }
 
-void vPollingModbus(void *pvParams)
-{
-  uint8_t INVERTER_ID = 1;
-  uint8_t CABIN_ID = 2;
-  uint8_t HALL_2_ID = 3;
-  uint8_t VSG_ID = 4;
+// void vPollingModbus(void *pvParams)
+// {
+//   uint8_t INVERTER_ID = 1;
+//   uint8_t CABIN_ID = 2;
+//   uint8_t HALL_2_ID = 3;
+//   uint8_t VSG_ID = 4;
 
-  uint16_t FIRST_REG_INVERTER = 28672;
-  uint16_t FIRST_REG_CABIN = 0;
-  uint16_t FIRST_REG_HALL = 0;
-  uint16_t FIRST_REG_VSG = 0;
+//   uint16_t FIRST_REG_INVERTER = 28672;
+//   uint16_t FIRST_REG_CABIN = 0;
+//   uint16_t FIRST_REG_HALL = 0;
+//   uint16_t FIRST_REG_VSG = 0;
 
-  uint16_t NUM_READ_INVERTER = 10;
-  uint16_t NUM_READ_CABIN = 1;
-  uint16_t NUM_READ_HALL = 1;
-  uint16_t NUM_READ_VSG = 1;
+//   uint16_t NUM_READ_INVERTER = 10;
+//   uint16_t NUM_READ_CABIN = 1;
+//   uint16_t NUM_READ_HALL = 1;
+//   uint16_t NUM_READ_VSG = 1;
 
-  uint16_t pollingData[5][32];
-  // memset(pollingData, 0, sizeof(pollingData));
+//   uint16_t pollingData[5][32];
+//   // memset(pollingData, 0, sizeof(pollingData));
 
-  const uint8_t MAX_RETRIES = 3;
+//   const uint8_t MAX_RETRIES = 3;
 
-  bool is_inverter_safe = true;
-  bool is_cabin_safe = true;
-  bool is_hall2_safe = true;
-  bool is_vsg_safe = true;
+//   bool is_inverter_safe = true;
+//   bool is_cabin_safe = true;
+//   bool is_hall2_safe = true;
+//   bool is_vsg_safe = true;
 
-  for (;;)
-  {
-    bool read_success = false;
-    uint8_t retry_i = 0;
+//   for (;;)
+//   {
+//     bool read_success = false;
+//     uint8_t retry_i = 0;
 
-    if (xSemaphoreTake(modbusMutex, pdMS_TO_TICKS(10)) == pdTRUE)
-    {
-      switch (read_current_sta)
-      {
-      // -----------------------------------------------------------
-      // CASE 1: INVERTER
-      // -----------------------------------------------------------
-      case INVERTER_STA:
-        read_success = false;
-        for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
-        {
-          if (readDataFrom(INVERTER_ID, FIRST_REG_INVERTER, NUM_READ_INVERTER, pollingData[INVERTER_ID]))
-          {
-            read_success = true;
-            break;
-          }
-          vTaskDelay(modbusRetryTime);
-        }
+//     if (xSemaphoreTake(modbusMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+//     {
+//       switch (read_current_sta)
+//       {
+//       // -----------------------------------------------------------
+//       // CASE 1: INVERTER
+//       // -----------------------------------------------------------
+//       case INVERTER_STA:
+//         read_success = false;
+//         for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
+//         {
+//           if (readDataFrom(INVERTER_ID, FIRST_REG_INVERTER, NUM_READ_INVERTER, pollingData[INVERTER_ID]))
+//           {
+//             read_success = true;
+//             break;
+//           }
+//           vTaskDelay(modbusRetryTime);
+//         }
 
-        if (read_success)
-        {
-          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
-          {
-            inverterState.running_hz = pollingData[INVERTER_ID][0] & (1 << 0);
-            inverterState.torque = pollingData[INVERTER_ID][0] & (1 << 6);
-            inverterState.digitalInput = pollingData[INVERTER_ID][0] & (1 << 7);
-            xSemaphoreGive(dataMutex);
-          }
-        }
-        else
-        {
-          xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
-          is_inverter_safe = false;
-        }
-        read_current_sta = CABIN_STA;
-        break;
+//         if (read_success)
+//         {
+//           if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+//           {
+//             inverterState.running_hz = pollingData[INVERTER_ID][0] & (1 << 0);
+//             inverterState.torque = pollingData[INVERTER_ID][0] & (1 << 6);
+//             inverterState.digitalInput = pollingData[INVERTER_ID][0] & (1 << 7);
+//             xSemaphoreGive(dataMutex);
+//           }
+//         }
+//         else
+//         {
+//           xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+//           is_inverter_safe = false;
+//         }
+//         read_current_sta = CABIN_STA;
+//         break;
 
-      // -----------------------------------------------------------
-      // CASE 2: CABIN
-      // -----------------------------------------------------------
-      case CABIN_STA:
-        read_success = false;
-        for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
-        {
-          if (readDataFrom(CABIN_ID, FIRST_REG_CABIN, NUM_READ_CABIN, pollingData[CABIN_ID]))
-          {
-            read_success = true;
-            break;
-          }
-          vTaskDelay(modbusRetryTime);
-        }
+//       // -----------------------------------------------------------
+//       // CASE 2: CABIN
+//       // -----------------------------------------------------------
+//       case CABIN_STA:
+//         read_success = false;
+//         for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
+//         {
+//           if (readDataFrom(CABIN_ID, FIRST_REG_CABIN, NUM_READ_CABIN, pollingData[CABIN_ID]))
+//           {
+//             read_success = true;
+//             break;
+//           }
+//           vTaskDelay(modbusRetryTime);
+//         }
 
-        if (read_success)
-        {
-          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
-          {
-            cabinState.isDoorClosed = pollingData[CABIN_ID][0] & (1 << 0);
-            cabinState.isAimUP = pollingData[CABIN_ID][0] & (1 << 1);
-            cabinState.isAimDW = pollingData[CABIN_ID][0] & (1 << 2);
-            cabinState.isUserStop = pollingData[CABIN_ID][0] & (1 << 3);
-            cabinState.isEmergStop = pollingData[CABIN_ID][0] & (1 << 4);
-            cabinState.isBusy = pollingData[CABIN_ID][0] & (1 << 5);
-            xSemaphoreGive(dataMutex);
-          }
-        }
-        else
-        {
-          xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
-          is_cabin_safe = false;
-        }
+//         if (read_success)
+//         {
+//           if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+//           {
+//             cabinState.isDoorClosed = pollingData[CABIN_ID][0] & (1 << 0);
+//             cabinState.isAimUP = pollingData[CABIN_ID][0] & (1 << 1);
+//             cabinState.isAimDW = pollingData[CABIN_ID][0] & (1 << 2);
+//             cabinState.isUserStop = pollingData[CABIN_ID][0] & (1 << 3);
+//             cabinState.isEmergStop = pollingData[CABIN_ID][0] & (1 << 4);
+//             cabinState.isBusy = pollingData[CABIN_ID][0] & (1 << 5);
+//             xSemaphoreGive(dataMutex);
+//           }
+//         }
+//         else
+//         {
+//           xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+//           is_cabin_safe = false;
+//         }
 
-        read_current_sta = HALL_2_STA;
-        break;
+//         read_current_sta = HALL_2_STA;
+//         break;
 
-      // -----------------------------------------------------------
-      // CASE 3: HALL 2
-      // -----------------------------------------------------------
-      case HALL_2_STA:
-        // read_success = false;
-        // for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
-        // {
-        //   if (readDataFrom(HALL_2_ID, FIRST_REG_HALL, NUM_READ_HALL, pollingData[HALL_2_ID]))
-        //   {
-        //     read_success = true;
-        //     break;
-        //   }
-        //   vTaskDelay(pdMS_TO_TICKS(10));
-        // }
+//       // -----------------------------------------------------------
+//       // CASE 3: HALL 2
+//       // -----------------------------------------------------------
+//       case HALL_2_STA:
+//         // read_success = false;
+//         // for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
+//         // {
+//         //   if (readDataFrom(HALL_2_ID, FIRST_REG_HALL, NUM_READ_HALL, pollingData[HALL_2_ID]))
+//         //   {
+//         //     read_success = true;
+//         //     break;
+//         //   }
+//         //   vTaskDelay(pdMS_TO_TICKS(10));
+//         // }
 
-        // if (read_success)
-        // {
-        //   if (pollingData[HALL_2_ID][0] == 1)
-        //   {
-        //     is_hall2_safe = false;
-        //     xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-        //   }
-        //   else
-        //   {
-        //     is_hall2_safe = true;
-        //   }
-        // }
-        // else
-        // {
-        //   // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
-        //   is_hall2_safe = false;
-        // }
+//         // if (read_success)
+//         // {
+//         //   if (pollingData[HALL_2_ID][0] == 1)
+//         //   {
+//         //     is_hall2_safe = false;
+//         //     xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
+//         //   }
+//         //   else
+//         //   {
+//         //     is_hall2_safe = true;
+//         //   }
+//         // }
+//         // else
+//         // {
+//         //   // xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+//         //   is_hall2_safe = false;
+//         // }
 
-        read_current_sta = VSG_STA;
-        break;
+//         read_current_sta = VSG_STA;
+//         break;
 
-      // -----------------------------------------------------------
-      // CASE 4: VSG
-      // -----------------------------------------------------------
-      case VSG_STA:
-        read_success = false;
-        for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
-        {
-          if (readDataFrom(VSG_ID, FIRST_REG_VSG, NUM_READ_VSG, pollingData[VSG_ID]))
-          {
-            read_success = true;
-            break;
-          }
-          vTaskDelay(modbusRetryTime);
-        }
+//       // -----------------------------------------------------------
+//       // CASE 4: VSG
+//       // -----------------------------------------------------------
+//       case VSG_STA:
+//         read_success = false;
+//         for (retry_i = 0; retry_i < MAX_RETRIES; retry_i++)
+//         {
+//           if (readDataFrom(VSG_ID, FIRST_REG_VSG, NUM_READ_VSG, pollingData[VSG_ID]))
+//           {
+//             read_success = true;
+//             break;
+//           }
+//           vTaskDelay(modbusRetryTime);
+//         }
 
-        if (read_success)
-        {
-          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
-          {
-            vsgState.shouldPause = pollingData[VSG_ID][0] & (1 << 0);
-            vsgState.isAlarm[0] = pollingData[VSG_ID][0] & (1 << 1);
-            vsgState.isAlarm[1] = pollingData[VSG_ID][0] & (1 << 2);
-            vsgState.isAlarm[2] = pollingData[VSG_ID][0] & (1 << 3);
-            vsgState.isAlarm[3] = pollingData[VSG_ID][0] & (1 << 4);
-            vsgState.isAlarm[4] = pollingData[VSG_ID][0] & (1 << 5);
-            xSemaphoreGive(dataMutex);
-          }
-        }
-        else
-        {
-          xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
-          is_vsg_safe = false;
-        }
+//         if (read_success)
+//         {
+//           if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+//           {
+//             vsgState.shouldPause = pollingData[VSG_ID][0] & (1 << 0);
+//             vsgState.isAlarm[0] = pollingData[VSG_ID][0] & (1 << 1);
+//             vsgState.isAlarm[1] = pollingData[VSG_ID][0] & (1 << 2);
+//             vsgState.isAlarm[2] = pollingData[VSG_ID][0] & (1 << 3);
+//             vsgState.isAlarm[3] = pollingData[VSG_ID][0] & (1 << 4);
+//             vsgState.isAlarm[4] = pollingData[VSG_ID][0] & (1 << 5);
+//             xSemaphoreGive(dataMutex);
+//           }
+//         }
+//         else
+//         {
+//           xTaskNotify(xOchestratorHandle, modbusTimeout, eSetValueWithOverwrite);
+//           is_vsg_safe = false;
+//         }
 
-        if (elevator.state == STATE_PAUSED)
-        {
-          if (is_inverter_safe && is_cabin_safe && is_vsg_safe)
-          {
-            xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
-          }
-        }
+//         if (elevator.state == STATE_PAUSED)
+//         {
+//           if (is_inverter_safe && is_cabin_safe && is_vsg_safe)
+//           {
+//             xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
+//           }
+//         }
 
-        read_current_sta = INVERTER_STA;
-        break;
-      }
-      xSemaphoreGive(modbusMutex);
-    }
-    vTaskDelay(modbusDelayTime);
-  }
-}
+//         read_current_sta = INVERTER_STA;
+//         break;
+//       }
+//       xSemaphoreGive(modbusMutex);
+//     }
+//     vTaskDelay(modbusDelayTime);
+//   }
+// }
 
-void vWriteStation(void *pvParams)
+// void vWriteStation(void *pvParams)
+// {
+// uint8_t INVERTER_ID = 1;
+// uint8_t CABIN_ID = 2;
+// uint8_t HALL_2_ID = 3;
+// uint8_t VSG_ID = 4;
+
+// uint16_t FIRST_REG_INVERTER = 28672;
+// uint16_t FIRST_REG_CABIN = 1;
+// uint16_t FIRST_REG_HALL = 1;
+// uint16_t FIRST_REG_VSG = 1;
+
+// uint16_t NUM_READ_INVERTER = 10;
+// uint16_t NUM_READ_CABIN = 1;
+// uint16_t NUM_READ_HALL = 1;
+// uint16_t NUM_READ_VSG = 1;
+
+//   uint16_t localValToSend = 0;
+//   bool needToSend = false;
+
+//   for (;;)
+//   {
+
+//     if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+//     {
+//       if (cabinState.shouldWrite == true)
+//       {
+//         localValToSend = cabinState.writtenFrame[1];
+//         needToSend = true;
+//         cabinState.shouldWrite = false;
+//       }
+//       else
+//       {
+//         needToSend = false;
+//       }
+//       xSemaphoreGive(dataMutex);
+//     }
+
+//     if (needToSend)
+//     {
+//       if (xSemaphoreTake(modbusMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+//       {
+
+//         node.begin(CABIN_ID, Serial1);
+//         node.writeSingleRegister(0x0001, localValToSend);
+//         cabinState.shouldWrite = false;
+
+//         xSemaphoreGive(modbusMutex);
+//       }
+//     }
+
+//     vTaskDelay(50);
+//   }
+// }
+
+void vModbusMaster(void *pvParams)
 {
   uint8_t INVERTER_ID = 1;
   uint8_t CABIN_ID = 2;
@@ -1971,42 +2027,88 @@ void vWriteStation(void *pvParams)
   uint16_t NUM_READ_CABIN = 1;
   uint16_t NUM_READ_HALL = 1;
   uint16_t NUM_READ_VSG = 1;
-
-  uint16_t localValToSend = 0;
-  bool needToSend = false;
-
+  modbusStation_t read_state = INVERTER_STA;
+  uint16_t pollingData[5][16];
+  uint8_t result;
+  uint8_t test_counter = 0;
   for (;;)
   {
+    bool needWrite = false;
+    uint16_t valToWrite = 0;
 
     if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
-      if (cabinState.shouldWrite == true)
+      if (cabinState.shouldWrite)
       {
-        localValToSend = cabinState.writtenFrame[1];
-        needToSend = true;
+        needWrite = true;
+        valToWrite = cabinState.writtenFrame[1];
         cabinState.shouldWrite = false;
-      }
-      else
-      {
-        needToSend = false;
       }
       xSemaphoreGive(dataMutex);
     }
 
-    if (needToSend)
+    if (needWrite)
     {
-      if (xSemaphoreTake(modbusMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+      // node.begin(CABIN_ID, Serial1);
+      // result = node.writeSingleRegister(0x0001, valToWrite);
+      test_counter++;
+      node.begin(VSG_ID, Serial1);
+      result = node.writeSingleRegister(0x0001, test_counter);
+
+      if (result != node.ku8MBSuccess)
       {
-
-        node.begin(CABIN_ID, Serial1);
-        node.writeSingleRegister(0x0001, localValToSend);
-        cabinState.shouldWrite = false;
-
-        xSemaphoreGive(modbusMutex);
+        Serial.printf("Write Error: 0x%02X\n", result);
       }
+      vTaskDelay(pdMS_TO_TICKS(20)); // silence between mb package
     }
 
-    vTaskDelay(50);
+    // --- 2. POLLING STATE MACHINE:
+    if (xSemaphoreTake(modbusMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+    {
+
+      switch (read_state)
+      {
+      case INVERTER_STA:
+        if (readDataFrom(INVERTER_ID, 28672, 10, pollingData[INVERTER_ID]))
+        {
+          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+          {
+            inverterState.digitalInput = pollingData[INVERTER_ID][0] & (1 << 7);
+            xSemaphoreGive(dataMutex);
+          }
+        }
+        read_state = CABIN_STA;
+        break;
+
+      case CABIN_STA:
+        if (readDataFrom(CABIN_ID, 0, 1, pollingData[CABIN_ID]))
+        {
+          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+          {
+            cabinState.isDoorClosed = pollingData[CABIN_ID][0] & (1 << 0);
+            cabinState.isEmergStop = pollingData[CABIN_ID][0] & (1 << 4);
+            xSemaphoreGive(dataMutex);
+          }
+        }
+        read_state = VSG_STA;
+        break;
+
+      case VSG_STA:
+        if (readDataFrom(VSG_ID, 0, 1, pollingData[VSG_ID]))
+        {
+          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+          {
+            vsgState.shouldPause = pollingData[VSG_ID][0] & (1 << 0);
+            xSemaphoreGive(dataMutex);
+          }
+        }
+        read_state = INVERTER_STA;
+        break;
+      }
+      xSemaphoreGive(modbusMutex);
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(modbusDelayTime));
   }
 }
 
@@ -2123,7 +2225,7 @@ void vSafetySling(void *pvParams)
         vTaskDelay(10);
       }
     }
-    vTaskDelay(10);
+    // vTaskDelay(10);
   }
 }
 
@@ -2141,7 +2243,7 @@ void vEmergStop(void *pvParams)
         vTaskDelay(10);
       }
     }
-    vTaskDelay(10);
+    // vTaskDelay(10);
   }
 }
 
@@ -2159,7 +2261,7 @@ void vModbusTimeout(void *pvParams)
         vTaskDelay(10);
       }
     }
-    vTaskDelay(10);
+    // vTaskDelay(10);
   }
 }
 
@@ -2205,7 +2307,7 @@ void vNoPowerLanding(void *pvParams)
                                     .set = {.isBrake = true},
                                     .isBrake = true});
     }
-    vTaskDelay(10);
+    // vTaskDelay(10);
   }
 }
 
@@ -2483,8 +2585,9 @@ void setup()
   xTaskCreate(vNoPowerLanding, "NoPowerLanding", 1536, NULL, 4, &xNoPowerLandingHandle);
   xTaskCreate(vClearCommand, "ClearCommand", 1536, NULL, 4, &xClearCommandHandle);
 
-  xTaskCreate(vPollingModbus, "PollingModbus", 3072, NULL, 5, &xPollingModbusHandle);
-  xTaskCreate(vWriteStation, "WriteStation", 3072, NULL, 4, &xWriteStationHandle);
+  xTaskCreate(vModbusMaster, "ModbusMaster", 4096, NULL, 5, &xModbusMasterHandle);
+  // xTaskCreate(vPollingModbus, "PollingModbus", 3072, NULL, 5, &xPollingModbusHandle);
+  // xTaskCreate(vWriteStation, "WriteStation", 3072, NULL, 4, &xWriteStationHandle);
 
   xTaskCreate(vPollingFloorSensor1, "PollingFloorSensor", 2048, NULL, 4, &xPollingFloorSensor1Handle);
   xTaskCreate(vPollingFloorSensor2, "PollingFloorSensor2", 2048, NULL, 4, &xPollingFloorSensor2Handle);
