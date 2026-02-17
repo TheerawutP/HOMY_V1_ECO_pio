@@ -132,8 +132,8 @@ inverter_t inverterState = {
     .digitalInput = 0};
 
 vsg_t vsgState = {
-    .isAlarm = false,
-    .shouldStop = false};
+    .isAlarm = {0},
+    .shouldPause = false};
 
 // while sleep param
 
@@ -207,16 +207,14 @@ void writeFrameDFPlayer(uint8_t track, uint16_t &dataframe, bool isBusy, uint8_t
 
   if (isBusy == true)
   {
-    // write clear busy bit = true
-    writeBit(dataframe, startDFBits + 1, true);
-    // write enable dfplayer
+    // writeBit(dataframe, startDFBits + 1, true);
+    // writeBit(dataframe, startDFBits, true);
 
-    writeBit(dataframe, startDFBits, true);
-
-    // *dataframe |= (1 << (startDFBits + 1));
+    // clear busy dfplayer
+    dataframe |= (1 << (startDFBits + 1));
 
     // //write enable dfplayer
-    // *dataframe |= (1 << startDFBits);
+    dataframe |= (1 << startDFBits);
 
     // clear df 4-bit before overwrite
     dataframe &= ~(0x0F << (startDFBits + 2));
@@ -1559,7 +1557,7 @@ void vOchestrator(void *pvParams)
         emoDeactivate();
       }
 
-      if (vsgState.shouldStop == true)
+      if (vsgState.shouldPause == true)
       {
         xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
       }
@@ -1576,31 +1574,30 @@ void vOchestrator(void *pvParams)
         {
           abortMotion();
         }
-
-        transit(command);
-        break;
-
-      case STATE_PAUSED:
-
-        if (cabinState.isDoorClosed == true)
-        {
-          xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
-        }
-
-        if (vsgState.shouldStop == false)
-        {
-          xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
-        }
-
-        break;
-
-      case STATE_EMERGENCY:
-        // emergencyHandler(evtType);
-        break;
-
-      default:
-        break;
       }
+      transit(command);
+      break;
+
+    case STATE_PAUSED:
+
+      if (cabinState.isDoorClosed == true)
+      {
+        xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
+      }
+
+      if (vsgState.shouldPause == false)
+      {
+        xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
+      }
+
+      break;
+
+    case STATE_EMERGENCY:
+      // emergencyHandler(evtType);
+      break;
+
+    default:
+      break;
     }
 
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -1925,7 +1922,7 @@ void vPollingModbus(void *pvParams)
         {
           if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
           {
-            vsgState.shouldStop = pollingData[VSG_ID][0] & (1 << 0);
+            vsgState.shouldPause = pollingData[VSG_ID][0] & (1 << 0);
             vsgState.isAlarm[0] = pollingData[VSG_ID][0] & (1 << 1);
             vsgState.isAlarm[1] = pollingData[VSG_ID][0] & (1 << 2);
             vsgState.isAlarm[2] = pollingData[VSG_ID][0] & (1 << 3);
@@ -1974,21 +1971,40 @@ void vWriteStation(void *pvParams)
   uint16_t NUM_READ_HALL = 1;
   uint16_t NUM_READ_VSG = 1;
 
-  bool is_inverter_safe = true;
-  bool is_cabin_safe = true;
-  bool is_hall2_safe = true;
-  bool is_vsg_safe = true;
-  elevatorEvent_t evt;
+  uint16_t localValToSend = 0;
+  bool needToSend = false;
 
   for (;;)
   {
-    if (xSemaphoreTake(modbusMutex, portMAX_DELAY) == pdTRUE)
+
+    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
-      if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+      if (cabinState.shouldWrite == true)
       {
+        localValToSend = cabinState.writtenFrame[1];
+        needToSend = true;
+        cabinState.shouldWrite = false;
       }
-      xSemaphoreGive(modbusMutex);
+      else
+      {
+        needToSend = false;
+      }
+      xSemaphoreGive(dataMutex);
     }
+
+    if (needToSend)
+    {
+      if (xSemaphoreTake(modbusMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+      {
+
+        node.begin(CABIN_ID, Serial1);
+        node.writeSingleRegister(0x0001, localValToSend);
+        cabinState.shouldWrite = false;
+
+        xSemaphoreGive(modbusMutex);
+      }
+    }
+
     vTaskDelay(modbusDelayTime);
   }
 }
@@ -2094,6 +2110,7 @@ void vPollingNoPower(void *pvParams)
 // safety threads
 void vSafetySling(void *pvParams)
 {
+
   for (;;)
   {
     if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY) > 0)
@@ -2465,7 +2482,7 @@ void setup()
   xTaskCreate(vNoPowerLanding, "NoPowerLanding", 1536, NULL, 4, &xNoPowerLandingHandle);
   xTaskCreate(vClearCommand, "ClearCommand", 1536, NULL, 4, &xClearCommandHandle);
 
-  xTaskCreate(vPollingModbus, "PollingModbus", 3072, NULL, 4, &xPollingModbusHandle);
+  xTaskCreate(vPollingModbus, "PollingModbus", 3072, NULL, 5, &xPollingModbusHandle);
   xTaskCreate(vWriteStation, "WriteStation", 3072, NULL, 4, &xWriteStationHandle);
 
   xTaskCreate(vPollingFloorSensor1, "PollingFloorSensor", 2048, NULL, 4, &xPollingFloorSensor1Handle);

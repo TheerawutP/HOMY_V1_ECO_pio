@@ -135,7 +135,7 @@ typedef struct{
  bool shouldWrite;
 
  bool isAlarm[5];
- bool shouldStop;
+ bool shouldPause;
 } vsg_t;
 
 
