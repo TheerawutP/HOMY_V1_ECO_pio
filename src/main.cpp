@@ -1541,6 +1541,7 @@ void vOchestrator(void *pvParams)
       break;
 
     case STATE_RUNNING:
+      transit(command);
 
       if (inverterState.digitalInput == INVERTER_DI_STOP)
       {
@@ -1572,12 +1573,13 @@ void vOchestrator(void *pvParams)
         lastCommandTime = millis();
         modbusDelayTime = FAST_POLL_MS;
         modbusRetryTime = FAST_RETRY_MS;
+
         if (cmd == userAbort)
         {
           abortMotion();
         }
       }
-      transit(command);
+
       break;
 
     case STATE_PAUSED:
