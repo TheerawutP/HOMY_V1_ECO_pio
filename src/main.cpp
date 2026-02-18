@@ -159,6 +159,8 @@ vsg_t vsgState = {
 
 // other helpers
 
+//movement helpers
+
 inline void ROTATE(direction_t dir)
 {
   if (dir == DIR_UP)
@@ -204,6 +206,51 @@ inline void emoDeactivate()
   digitalWrite(EMO, LOW);
 }
 
+void abortMotion()
+{
+  if (elevator.isBrake == true)
+  {
+    return;
+  }
+
+  M_STP();
+  BRK_ON();
+
+  updateElevator(&elevator, (update_status_t){
+                                .set = {.state = true, .dir = true, .lastDir = true, .target = true, .isBrake = true},
+                                .state = STATE_IDLE,
+                                .dir = DIR_NONE,
+                                .lastDir = elevator.dir,
+                                .target = 0,
+                                .isBrake = true});
+
+  Serial.println("Elevator Halted.");
+}
+
+//modbus helpers
+bool readDataFrom(uint8_t slaveID, uint16_t startAddress, uint8_t numRead, uint16_t *hreg_row)
+{
+  node.begin(slaveID, Serial1);
+  uint8_t result = node.readHoldingRegisters(startAddress, numRead);
+
+  if (result == node.ku8MBSuccess)
+  {
+    for (int i = 0; i < numRead; i++)
+    {
+      hreg_row[i] = node.getResponseBuffer(i);
+    }
+    return true;
+  }
+  else
+  {
+    Serial.print("Error at ID ");
+    Serial.print(slaveID);
+    Serial.print(": ");
+    Serial.println(result, HEX);
+    return false;
+  }
+}
+
 void enableTransmit(bool &shouldWrite)
 {
   shouldWrite = true;
@@ -244,7 +291,8 @@ void writeFrameDFPlayer(uint8_t track, uint16_t &dataframe, bool isBusy, uint8_t
   }
 }
 
-// main helpers
+// update elevator val helpers
+
 const char *getStateString(state_t s)
 {
   switch (s)
@@ -324,6 +372,8 @@ void updateElevator(status_t *dest, update_status_t up)
   dest->hasChanged = true;
   // taskEXIT_CRITICAL();
 }
+
+// background helpers
 
 void setupMQTT()
 {
@@ -1369,55 +1419,6 @@ void transit(transitCommand_t cmd)
   }
 }
 
-//
-//
-//
-//
-
-void abortMotion()
-{
-  if (elevator.isBrake == true)
-  {
-    return;
-  }
-
-  M_STP();
-  BRK_ON();
-
-  updateElevator(&elevator, (update_status_t){
-                                .set = {.state = true, .dir = true, .lastDir = true, .target = true, .isBrake = true},
-                                .state = STATE_IDLE,
-                                .dir = DIR_NONE,
-                                .lastDir = elevator.dir,
-                                .target = 0,
-                                .isBrake = true});
-
-  Serial.println("Elevator Halted.");
-}
-
-bool readDataFrom(uint8_t slaveID, uint16_t startAddress, uint8_t numRead, uint16_t *hreg_row)
-{
-  node.begin(slaveID, Serial1);
-  uint8_t result = node.readHoldingRegisters(startAddress, numRead);
-
-  if (result == node.ku8MBSuccess)
-  {
-    for (int i = 0; i < numRead; i++)
-    {
-      hreg_row[i] = node.getResponseBuffer(i);
-    }
-    return true;
-  }
-  else
-  {
-    Serial.print("Error at ID ");
-    Serial.print(slaveID);
-    Serial.print(": ");
-    Serial.println(result, HEX);
-    return false;
-  }
-}
-
 // void emergencyHandler(elevatorEvent_t emergeType)
 // {
 //   switch (emergeType)
@@ -1575,7 +1576,7 @@ void vOchestrator(void *pvParams)
       if (xTimerIsTimerActive(xStartRunningTimer) == pdFALSE)
       {
         xTimerStart(xStartRunningTimer, 0);
-        Serial.println(">> Timer Started (Waiting 300ms...)");
+        Serial.println(">> Timer Started (Waiting for bit...)");
       }
       break;
 
@@ -1737,6 +1738,7 @@ void vRFReceiver(void *pvParams)
 }
 
 // timer callbacks
+
 void vStartRunning(TimerHandle_t xTimer)
 {
   if (elevator.state == STATE_PENDING)
@@ -1757,6 +1759,7 @@ void vStartRunning(TimerHandle_t xTimer)
     }
   }
 }
+
 // polling threads
 
 // void vPollingModbus(void *pvParams)
@@ -2217,6 +2220,8 @@ void vPollingFloorSensor2(void *pvParams) // first floor sensor
   }
 }
 
+//safety task handlers
+
 void vPollingNoPower(void *pvParams)
 {
   uint8_t stable_counter = 0;
@@ -2259,7 +2264,6 @@ void vPollingNoPower(void *pvParams)
   }
 }
 
-// safety threads with event group bits
 void vSafetySling(void *pvParams)
 {
 
@@ -2366,7 +2370,6 @@ void vNoPowerLanding(void *pvParams)
 //   }
 // }
 
-// safety threads without event group bits
 void vClearCommand(void *pvParams)
 {
   for (;;)
@@ -2379,6 +2382,7 @@ void vClearCommand(void *pvParams)
 }
 
 // other threads
+
 void vReconnectTask(void *pvParams)
 {
   for (;;)
