@@ -74,15 +74,17 @@ typedef struct {
 
 enum elevatorEvent_t
 {
-  safetySling,
-  emergStop,
-  pauseClear,
-  noPowerLanding,
-  modbusTimeout,
-  clearCommand,
-  reachFloor1,
-  reachFloor2,
-  powerRestored
+  SAFETY_BRAKE,
+  DOOR_IS_OPEN,
+  VTG_ALARM,
+  VSG_ALARM,
+  MODBUS_TIMEOUT,
+  NO_POWER,
+  COMMAND_CLEAR,
+  FLOOR1_REACHED,
+  FLOOR2_REACHED,
+  POWER_RESTORED,
+  PAUSED_CLEARED
 };
 
 enum commandType_t
@@ -98,7 +100,7 @@ enum commandSource_t
   FROM_RF,
   FROM_WS,
   FROM_CABIN,
-  FROM_HALL
+  FROM_HALL2
 };
 
 typedef struct
