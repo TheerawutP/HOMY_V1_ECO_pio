@@ -76,15 +76,20 @@ enum elevatorEvent_t
 {
   SAFETY_BRAKE,
   DOOR_IS_OPEN,
+  DOOR_IS_CLOSED,
   VTG_ALARM,
   VSG_ALARM,
+  VTG_CLEAR,
+  VSG_CLEAR,
   MODBUS_TIMEOUT,
   NO_POWER,
   COMMAND_CLEAR,
   FLOOR1_REACHED,
   FLOOR2_REACHED,
   POWER_RESTORED,
-  PAUSED_CLEARED
+  PAUSED_CLEARED,
+  EMERG_PRESSED,
+  EMERG_RELEASED
 };
 
 enum commandType_t
@@ -125,11 +130,12 @@ typedef struct{
   bool shouldWrite;
 
   bool isDoorClosed;
-  bool isAimUP;
-  bool isAimDW;
+  bool isAim2;
+  bool isAim1;
   bool isUserStop;
   bool isEmergStop;
   bool isBusy;
+  bool vtgAlarm;
 } cabin_t;
 
 typedef struct{ 
