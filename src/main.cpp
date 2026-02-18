@@ -60,7 +60,7 @@
 // ms timings
 // #define DEBOUNCE_MS 1000
 // #define BRAKE_MS 2000
-#define WAIT_TO_RUNNING_MS 300
+#define WAIT_TO_RUNNING_MS 600
 // #define POWER_CUT_MS 3000
 
 uint8_t torque_rated_up = 80;
@@ -225,6 +225,25 @@ void abortMotion()
                                 .isBrake = true});
 
   Serial.println("Elevator Halted.");
+}
+
+bool isSafeToRun(direction_t dir) {
+    EventBits_t currentBits = xEventGroupGetBits(xRunningEventGroup);
+
+    if (dir == DIR_UP) {
+        if ((currentBits & BLOCK_UP_MASK) != 0) {
+            Serial.printf("BLOCKED UP! Reason bits: 0x%X\n", (currentBits & BLOCK_UP_MASK));
+            return false;
+        }
+    } 
+    else if (dir == DIR_DOWN) {
+        if ((currentBits & BLOCK_DOWN_MASK) != 0) {
+            Serial.printf("BLOCKED DOWN! Reason bits: 0x%X\n", (currentBits & BLOCK_DOWN_MASK));
+            return false;
+        }
+    }
+
+    return true; 
 }
 
 //modbus helpers
@@ -1581,9 +1600,9 @@ void vOchestrator(void *pvParams)
       break;
 
     case STATE_RUNNING:
-
+      if(isSafeToRun(command.dir)){
       transit(command);
-
+      }
       // if (inverterState.digitalInput == INVERTER_DI_STOP)
       // {
       //   xTaskNotify(xOchestratorHandle, clearCommand, eSetValueWithOverwrite);
