@@ -41,13 +41,30 @@
 #define STOP 174737
 #define INVERTER_DI_STOP 992
 
+// both dir block
+#define MODBUS_DIS_BIT (1 << 0) // 0x01
+#define DOOR_OPEN_BIT (1 << 1)  // 0x02
+#define EMERG_BIT (1 << 2)      // 0x04
+
+// block go up
+#define VTG_BIT (1 << 3) // 0x08
+
+// block go down
+#define SAFETY_BRAKE_BIT (1 << 4) // 0x10
+#define VSG_BIT (1 << 5)          // 0x20
+
+// block dir group (true = dont allowed)
+#define BLOCK_UP_MASK (VTG_BIT | EMERG_BIT | DOOR_OPEN_BIT | MODBUS_DIS_BIT)
+#define BLOCK_DOWN_MASK (SAFETY_BRAKE_BIT | VSG_BIT | EMERG_BIT | DOOR_OPEN_BIT | MODBUS_DIS_BIT)
+
 // ms timings
 // #define DEBOUNCE_MS 1000
 // #define BRAKE_MS 2000
 #define WAIT_TO_RUNNING_MS 300
 // #define POWER_CUT_MS 3000
 
-#define TORQUE_RATED 50
+uint8_t torque_rated_up = 80;
+uint8_t torque_rated_down = 40; // both in percentage
 
 volatile uint32_t modbusDelayTime = 50;
 volatile uint32_t modbusRetryTime = 20;
@@ -87,9 +104,11 @@ TaskHandle_t xEmergeStopHandle;
 TaskHandle_t xNoPowerLandingHandle;
 TaskHandle_t xModbusTimeoutHandle;
 TaskHandle_t xClearCommandHandle;
-TaskHandle_t xModbusMasterHandle;
+TaskHandle_t xPollingModbusMasterHandle;
 TaskHandle_t xWriteStationHandle;
 TimerHandle_t xStartRunningTimer;
+
+EventGroupHandle_t xRunningEventGroup;
 
 AsyncWebServer server(80);
 WebSocketsServer m_websocketserver = WebSocketsServer(81);
@@ -1144,37 +1163,35 @@ void configureserver()
   server.begin();
 }
 
+//
+//
+//
+//
+//
+
 void eventListener(uint32_t ulNotificationValue, elevatorEvent_t *emg)
 {
   *emg = (elevatorEvent_t)ulNotificationValue;
 
   switch (*emg)
   {
-  case safetySling:
+  case SAFETY_BRAKE:
     updateElevator(&elevator, (update_status_t){
                                   .set = {.state = true},
                                   .state = STATE_EMERGENCY});
     xTaskNotifyGive(xSafetySlingHandle);
     break;
 
-  case emergStop:
-    emoDeactivate();
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {.state = true},
-                                  .state = STATE_PAUSED,
-                              });
-    xTaskNotifyGive(xEmergeStopHandle);
+  case DOOR_IS_OPEN:
+    xEventGroupSetBits(xRunningEventGroup, DOOR_OPEN_BIT);
+
     break;
 
-  case noPowerLanding:
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {.state = true},
-                                  .state = STATE_EMERGENCY,
-                              });
-    xTaskNotifyGive(xNoPowerLandingHandle);
-    break;
+  case VTG_ALARM:
 
-  case modbusTimeout:
+  case VSG_ALARM:
+
+  case MODBUS_TIMEOUT:
     emoDeactivate();
     updateElevator(&elevator, (update_status_t){
                                   .set = {.state = true},
@@ -1183,36 +1200,53 @@ void eventListener(uint32_t ulNotificationValue, elevatorEvent_t *emg)
     xTaskNotifyGive(xModbusTimeoutHandle);
     break;
 
-  case clearCommand:
+  case NO_POWER:
+    updateElevator(&elevator, (update_status_t){
+                                  .set = {.state = true},
+                                  .state = STATE_EMERGENCY,
+                              });
+    xTaskNotifyGive(xNoPowerLandingHandle);
     break;
 
-  case reachFloor1:
+  case COMMAND_CLEAR:
+    break;
+
+  case FLOOR1_REACHED:
     updateElevator(&elevator, (update_status_t){
                                   .set = {.pos = true, .btwFloor = true},
                                   .pos = 1,
                                   .btwFloor = false});
     break;
 
-  case reachFloor2:
+  case FLOOR2_REACHED:
     updateElevator(&elevator, (update_status_t){
                                   .set = {.pos = true, .btwFloor = true},
                                   .pos = 2,
                                   .btwFloor = false});
     break;
 
-  case powerRestored:
+  case POWER_RESTORED:
     updateElevator(&elevator, (update_status_t){
                                   .set = {.state = true, .isBrake = true},
                                   .state = STATE_IDLE,
                                   .isBrake = true});
     break;
 
-  case pauseClear:
+  case PAUSED_CLEARED:
     updateElevator(&elevator, (update_status_t){
                                   .set = {.state = true},
                                   .state = STATE_PENDING,
                               });
     break;
+
+    // case emergStop:
+    //   emoActivate();
+    //   updateElevator(&elevator, (update_status_t){
+    //                                 .set = {.state = true},
+    //                                 .state = STATE_PAUSED,
+    //                             });
+    //   xTaskNotifyGive(xEmergeStopHandle);
+    //   break;
 
   default:
     break;
@@ -1257,10 +1291,10 @@ void getDir(uint8_t target, transitCommand_t *cmd)
     if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
 
-    writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
-    enableTransmit(cabinState.shouldWrite);
-    writeBit(cabinState.writtenFrame[1], dirBit, true);
-    xSemaphoreGive(dataMutex);
+      writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+      enableTransmit(cabinState.shouldWrite);
+      writeBit(cabinState.writtenFrame[1], dirBit, true);
+      xSemaphoreGive(dataMutex);
     }
   }
   else
@@ -1303,10 +1337,10 @@ void getDir(uint8_t target, transitCommand_t *cmd)
 
       if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
       {
-      writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
-      enableTransmit(cabinState.shouldWrite);
-      writeBit(cabinState.writtenFrame[1], dirBit, true);
-      xSemaphoreGive(dataMutex);
+        writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+        enableTransmit(cabinState.shouldWrite);
+        writeBit(cabinState.writtenFrame[1], dirBit, true);
+        xSemaphoreGive(dataMutex);
       }
     }
     else
@@ -1334,6 +1368,11 @@ void transit(transitCommand_t cmd)
                                   .btwFloor = true});
   }
 }
+
+//
+//
+//
+//
 
 void abortMotion()
 {
@@ -1458,11 +1497,11 @@ void vOchestrator(void *pvParams)
     {
       eventListener(ulNotificationValue, &evtType);
 
-      if (evtType == reachFloor1)
+      if (evtType == FLOOR1_REACHED)
       {
         reachedFloorNum = 1;
       }
-      else if (evtType == reachFloor2)
+      else if (evtType == FLOOR2_REACHED)
       {
         reachedFloorNum = 2;
       }
@@ -1541,7 +1580,7 @@ void vOchestrator(void *pvParams)
       break;
 
     case STATE_RUNNING:
-      
+
       transit(command);
 
       // if (inverterState.digitalInput == INVERTER_DI_STOP)
@@ -1577,6 +1616,7 @@ void vOchestrator(void *pvParams)
 
         if (cmd == userAbort)
         {
+          emoDeactivate();
           abortMotion();
         }
       }
@@ -1587,12 +1627,12 @@ void vOchestrator(void *pvParams)
 
       if (cabinState.isDoorClosed == true)
       {
-        xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
+        xTaskNotify(xOchestratorHandle, PAUSED_CLEARED, eSetValueWithOverwrite);
       }
 
       if (vsgState.shouldPause == false)
       {
-        xTaskNotify(xOchestratorHandle, pauseClear, eSetValueWithOverwrite);
+        xTaskNotify(xOchestratorHandle, PAUSED_CLEARED, eSetValueWithOverwrite);
       }
 
       break;
@@ -2014,7 +2054,7 @@ void vStartRunning(TimerHandle_t xTimer)
 //   }
 // }
 
-void vModbusMaster(void *pvParams)
+void vPollingModbusMaster(void *pvParams)
 {
   uint8_t INVERTER_ID = 1;
   uint8_t CABIN_ID = 2;
@@ -2139,7 +2179,7 @@ void vPollingFloorSensor1(void *pvParams) // first floor sensor
 
     if (isAtFloor1 == true && hasNotified == false)
     {
-      xTaskNotify(xOchestratorHandle, reachFloor1, eSetValueWithOverwrite);
+      xTaskNotify(xOchestratorHandle, FLOOR1_REACHED, eSetValueWithOverwrite);
       hasNotified = true;
     }
     vTaskDelay(pdMS_TO_TICKS(20));
@@ -2151,7 +2191,6 @@ void vPollingFloorSensor2(void *pvParams) // first floor sensor
   uint8_t floorSensor2_counter = 0;
   const uint8_t STABLE_THRESHOLD = 20;
   bool hasNotified = false;
-
 
   for (;;)
   {
@@ -2171,7 +2210,7 @@ void vPollingFloorSensor2(void *pvParams) // first floor sensor
 
     if (isAtFloor2 == true && hasNotified == false)
     {
-      xTaskNotify(xOchestratorHandle, reachFloor2, eSetValueWithOverwrite);
+      xTaskNotify(xOchestratorHandle, FLOOR2_REACHED, eSetValueWithOverwrite);
       hasNotified = true;
     }
     vTaskDelay(pdMS_TO_TICKS(20));
@@ -2205,14 +2244,14 @@ void vPollingNoPower(void *pvParams)
     if (currentIsNoPower && !lastIsNoPower)
     {
       Serial.println(">> Event: Power LOST!");
-      xTaskNotify(xOchestratorHandle, noPowerLanding, eSetValueWithOverwrite);
+      xTaskNotify(xOchestratorHandle, NO_POWER, eSetValueWithOverwrite);
       lastIsNoPower = true;
     }
 
     else if (currentIsPowerOK && lastIsNoPower)
     {
       Serial.println(">> Event: Power RESTORED!");
-      xTaskNotify(xOchestratorHandle, powerRestored, eSetValueWithOverwrite);
+      xTaskNotify(xOchestratorHandle, POWER_RESTORED, eSetValueWithOverwrite);
       lastIsNoPower = false;
     }
 
@@ -2220,7 +2259,7 @@ void vPollingNoPower(void *pvParams)
   }
 }
 
-// safety threads
+// safety threads with event group bits
 void vSafetySling(void *pvParams)
 {
 
@@ -2321,6 +2360,13 @@ void vNoPowerLanding(void *pvParams)
   }
 }
 
+// void vOverTorque(){
+//   for(;;){
+
+//   }
+// }
+
+// safety threads without event group bits
 void vClearCommand(void *pvParams)
 {
   for (;;)
@@ -2333,7 +2379,6 @@ void vClearCommand(void *pvParams)
 }
 
 // other threads
-
 void vReconnectTask(void *pvParams)
 {
   for (;;)
@@ -2576,6 +2621,18 @@ void setup()
   // xSemLanding = xSemaphoreCreateBinary();
 
   // xTransitMutex = xSemaphoreCreateMutex();
+
+  xRunningEventGroup = xEventGroupCreate();
+
+  if (xRunningEventGroup != NULL)
+  {
+    xEventGroupClearBits(xRunningEventGroup, 0xFFFFFF); // ล้างทุก Bit
+  }
+  else
+  {
+    Serial.println("Error: Cannot create Event Group!");
+  }
+
   mqttMutex = xSemaphoreCreateMutex();
   modbusMutex = xSemaphoreCreateMutex();
   dataMutex = xSemaphoreCreateMutex();
@@ -2595,7 +2652,7 @@ void setup()
   xTaskCreate(vNoPowerLanding, "NoPowerLanding", 1536, NULL, 4, &xNoPowerLandingHandle);
   xTaskCreate(vClearCommand, "ClearCommand", 1536, NULL, 4, &xClearCommandHandle);
 
-  xTaskCreate(vModbusMaster, "ModbusMaster", 4096, NULL, 5, &xModbusMasterHandle);
+  xTaskCreate(vPollingModbusMaster, "ModbusMaster", 4096, NULL, 5, &xPollingModbusMasterHandle);
   // xTaskCreate(vPollingModbus, "PollingModbus", 3072, NULL, 5, &xPollingModbusHandle);
   // xTaskCreate(vWriteStation, "WriteStation", 3072, NULL, 4, &xWriteStationHandle);
 
