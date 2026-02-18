@@ -2680,4 +2680,63 @@ void setup()
 
 void loop()
 {
+  // static unsigned long lastDebugTime = 0;
+  // const unsigned long DEBUG_INTERVAL = 2000; 
+
+  // if (millis() - lastDebugTime > DEBUG_INTERVAL)
+  // {
+  //   lastDebugTime = millis();
+
+  //   
+  //   status_t dbg_elevator;
+  //   cabin_t dbg_cabin;
+  //   inverter_t dbg_inverter;
+  //   vsg_t dbg_vsg;
+  //   EventBits_t dbg_events = 0;
+
+  //   // --- BLOCK 1: Snapshot Data (Copy Thread-Safe) ---
+  //   if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+  //   {
+  //     dbg_elevator = elevator;
+  //     dbg_cabin = cabinState;
+  //     dbg_inverter = inverterState;
+  //     dbg_vsg = vsgState;
+  //     xSemaphoreGive(dataMutex);
+  //   }
+    
+  //   // Event Group (Safety Flags)
+  //   if (xRunningEventGroup != NULL) {
+  //       dbg_events = xEventGroupGetBits(xRunningEventGroup);
+  //   }
+
+  //   Serial.println("\n--- [ SYSTEM DEBUGGER ] ---");
+  //   Serial.printf("Uptime: %lu ms | Heap: %u bytes\n", millis(), ESP.getFreeHeap());
+
+  //   // --- BLOCK 2: Elevator Logic State ---
+  //   Serial.println(">> [LOGIC STATE]");
+  //   Serial.printf("  State: %s (%d)\n", getStateString(dbg_elevator.state), dbg_elevator.state);
+  //   Serial.printf("  Pos: %d | Target: %d | LastTarget: %d\n", dbg_elevator.pos, dbg_elevator.target, dbg_elevator.lastTarget);
+  //   Serial.printf("  Dir: %s | Brake Logic: %s\n", getDirString(dbg_elevator.dir), dbg_elevator.isBrake ? "LOCKED" : "RELEASED");
+
+  //   // --- BLOCK 3: Hardware I/O  ---
+  //   Serial.println(">> [HARDWARE I/O]");
+  //   Serial.printf("  Floor Sensors: FL1=%d, FL2=%d (0=Active)\n", digitalRead(floorSensor1), digitalRead(floorSensor2));
+  //   Serial.printf("  Power Monitor: %d (0=NoPower)\n", digitalRead(NoPower));
+  //   Serial.printf("  Relays: UP=%d, DW=%d, BRK=%d, EMO=%d\n", digitalRead(R_UP), digitalRead(R_DW), digitalRead(BRK), digitalRead(EMO));
+
+  //   // --- BLOCK 4: Modbus Data (Slave Status) ---
+  //   Serial.println(">> [MODBUS DATA]");
+  //   Serial.printf("  [INV] Hz: %d | Torque: %d | DI: %d\n", dbg_inverter.running_hz, dbg_inverter.torque, dbg_inverter.digitalInput);
+  //   Serial.printf("  [CABIN] DoorClosed: %d | Emerg: %d | Busy: %d\n", dbg_cabin.isDoorClosed, dbg_cabin.isEmergStop, dbg_cabin.isBusy);
+  //   Serial.printf("  [VSG] PauseReq: %d | Alarm[0]: %d\n", dbg_vsg.shouldPause, dbg_vsg.isAlarm[0]);
+
+  //   // --- BLOCK 5: Event Flags (Safety Blocks) ---
+  //   Serial.println(">> [SAFETY FLAGS]");
+  //   Serial.printf("  Raw Bits: 0x%06X\n", dbg_events);
+  //   Serial.printf("  - Door Open: %d\n", (dbg_events & DOOR_OPEN_BIT) ? 1 : 0);
+  //   Serial.printf("  - Modbus Dis: %d\n", (dbg_events & MODBUS_DIS_BIT) ? 1 : 0);
+  //   Serial.printf("  - Emergency: %d\n", (dbg_events & EMERG_BIT) ? 1 : 0);
+    
+  //   Serial.println("---------------------------");
+  // }
 }
