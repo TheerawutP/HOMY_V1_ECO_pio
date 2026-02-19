@@ -180,86 +180,6 @@ vsg_t vsgState = {
 // movement helpers
 // update elevator val helpers
 
-const char *getStateString(state_t s)
-{
-  switch (s)
-  {
-  case STATE_IDLE:
-    return "IDLE";
-  case STATE_RUNNING:
-    return "RUNNING";
-  case STATE_PENDING:
-    return "PENDING";
-  case STATE_PAUSED:
-    return "PAUSED";
-  case STATE_EMERGENCY:
-    return "EMERGENCY";
-  default:
-    return "UNKNOWN";
-  }
-}
-
-const char *getDirString(direction_t d)
-{
-  switch (d)
-  {
-  case DIR_UP:
-    return "UP";
-  case DIR_DOWN:
-    return "DOWN";
-  case DIR_NONE:
-    return "NONE";
-  default:
-    return "UNKNOWN";
-  }
-}
-
-void printElevatorStatus()
-{
-  Serial.println("=========== ELEVATOR STATUS ===========");
-
-  Serial.printf("Position (pos):      %d\n", elevator.pos);
-  Serial.printf("Target Floor:        %d\n", elevator.target);
-  Serial.printf("Last Target:         %d\n", elevator.lastTarget);
-
-  Serial.printf("State:               %s\n", getStateString(elevator.state));
-  Serial.printf("Direction (dir):     %s\n", getDirString(elevator.dir));
-  Serial.printf("Last Dir:            %s\n", getDirString(elevator.lastDir));
-
-  Serial.printf("Brake (isBrake):     %s\n", elevator.isBrake ? "ON (Locked)" : "OFF (Released)");
-  Serial.printf("Between Floor:       %s\n", elevator.btwFloor ? "YES" : "NO");
-
-  Serial.println("=======================================");
-}
-
-void updateElevator(status_t *dest, update_status_t up)
-{
-  if (dest == NULL)
-    return;
-
-  // taskENTER_CRITICAL();
-
-  if (up.set.pos)
-    dest->pos = up.pos;
-  if (up.set.state)
-    dest->state = up.state;
-  if (up.set.dir)
-    dest->dir = up.dir;
-  if (up.set.lastDir)
-    dest->lastDir = up.lastDir;
-  if (up.set.target)
-    dest->target = up.target;
-  if (up.set.lastTarget)
-    dest->lastTarget = up.lastTarget;
-  if (up.set.isBrake)
-    dest->isBrake = up.isBrake;
-  if (up.set.btwFloor)
-    dest->btwFloor = up.btwFloor;
-
-  dest->hasChanged = true;
-  // taskEXIT_CRITICAL();
-}
-
 inline void ROTATE(direction_t dir)
 {
   if (dir == DIR_UP)
@@ -319,13 +239,11 @@ void abortMotion()
   M_STP();
   BRK_ON();
 
-  updateElevator(&elevator, (update_status_t){
-                                .set = {.state = true, .dir = true, .lastDir = true, .target = true, .isBrake = true},
-                                .state = STATE_IDLE,
-                                .dir = DIR_NONE,
-                                .lastDir = elevator.dir,
-                                .target = 0,
-                                .isBrake = true});
+  elevator.state = STATE_IDLE;
+  elevator.lastDir = elevator.dir;
+  elevator.dir = DIR_NONE;
+  elevator.target = 0;
+  elevator.isBrake = true;
 
   Serial.println("Elevator Halted.");
 }
@@ -1217,9 +1135,7 @@ void configureserver()
                     int stateVal = paramValue.toInt();
 
                     state_t newState = (state_t)stateVal;
-                    updateElevator(&elevator, (update_status_t){
-                                                  .set = {.state = true},
-                                                  .state = newState});
+                    elevator.state = newState;
 
                     Serial.printf(">> Manual Force State to: %d \n", stateVal);
                   }
@@ -1272,10 +1188,7 @@ void eventListener(uint32_t ulNotificationValue, elevatorEvent_t *emg)
   {
   case SAFETY_BRAKE:
     xEventGroupSetBits(xRunningEventGroup, SAFETY_BRAKE_BIT);
-
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {.state = true},
-                                  .state = STATE_EMERGENCY});
+    elevator.state = STATE_EMERGENCY;
     xTaskNotifyGive(xSafetySlingHandle);
     break;
 
@@ -1285,78 +1198,74 @@ void eventListener(uint32_t ulNotificationValue, elevatorEvent_t *emg)
     abortMotion();
     break;
 
+  case DOOR_IS_CLOSED:
+    break;
+
   case VTG_ALARM:
     xEventGroupSetBits(xRunningEventGroup, VTG_BIT);
     emoActivate();
     abortMotion();
     break;
 
+  case VTG_CLEAR:
+    break;
+
   case VSG_ALARM:
     xEventGroupSetBits(xRunningEventGroup, VSG_BIT);
     M_STP();
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {.state = true},
-                                  .state = STATE_PAUSED,
-                              });
+    elevator.state = STATE_PAUSED;
+    break;
+
+  case VSG_CLEAR:
     break;
 
   case MODBUS_TIMEOUT:
     xEventGroupSetBits(xRunningEventGroup, MODBUS_DIS_BIT);
     M_STP();
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {.state = true},
-                                  .state = STATE_PAUSED,
-                              });
+    elevator.state = STATE_PAUSED;
+
     // xTaskNotifyGive(xModbusTimeoutHandle);
     break;
 
   case EMERG_PRESSED:
     xEventGroupSetBits(xRunningEventGroup, EMERG_BIT);
     emoActivate();
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {.state = true},
-                                  .state = STATE_IDLE,
-                              });
+    elevator.state = STATE_IDLE;
+
     // xTaskNotifyGive(xEmergeStopHandle);
     break;
 
+  case EMERG_RELEASED:
+    xEventGroupClearBits(xRunningEventGroup, EMERG_BIT);
+    break;
+
   case NO_POWER:
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {.state = true},
-                                  .state = STATE_EMERGENCY,
-                              });
+    elevator.state = STATE_EMERGENCY;
     xTaskNotifyGive(xNoPowerLandingHandle);
     break;
 
   case COMMAND_CLEAR:
+    abortMotion();
     break;
 
   case FLOOR1_REACHED:
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {.pos = true, .btwFloor = true},
-                                  .pos = 1,
-                                  .btwFloor = false});
+    elevator.pos = 1;
+    elevator.btwFloor = false;
     break;
 
   case FLOOR2_REACHED:
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {.pos = true, .btwFloor = true},
-                                  .pos = 2,
-                                  .btwFloor = false});
+    elevator.pos = 2;
+    elevator.btwFloor = false;
     break;
 
   case POWER_RESTORED:
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {.state = true, .isBrake = true},
-                                  .state = STATE_IDLE,
-                                  .isBrake = true});
+    elevator.state = STATE_IDLE;
+    elevator.isBrake = true;
+
     break;
 
   case PAUSED_CLEARED:
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {.state = true},
-                                  .state = STATE_PENDING,
-                              });
+    elevator.state = STATE_PENDING;
     break;
 
   default:
@@ -1376,17 +1285,10 @@ void getDir(uint8_t target, transitCommand_t *cmd)
     cmd->dir = newDir;
     cmd->target = newTarget;
 
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {
-                                      .state = true,
-                                      .dir = true,
-                                      .target = true,
-                                      .lastTarget = true},
-
-                                  .state = STATE_PENDING,
-                                  .dir = newDir,
-                                  .target = newTarget,
-                                  .lastTarget = newTarget});
+    elevator.state = STATE_PENDING;
+    elevator.dir = newDir;
+    elevator.lastTarget = elevator.target;
+    elevator.target = newTarget;
 
     if (newDir == DIR_UP)
     {
@@ -1425,15 +1327,9 @@ void getDir(uint8_t target, transitCommand_t *cmd)
       cmd->dir = newDir;
       cmd->target = newTarget;
 
-      updateElevator(&elevator, (update_status_t){
-                                    .set = {
-                                        .state = true,
-                                        .dir = true,
-                                        .target = true},
-
-                                    .state = STATE_PENDING,
-                                    .dir = newDir,
-                                    .target = newTarget});
+      elevator.state = STATE_PENDING;
+      elevator.dir = newDir;
+      elevator.target = newTarget;
 
       if (newDir == DIR_UP)
       {
@@ -1470,13 +1366,9 @@ void transit(transitCommand_t cmd)
   {
     BRK_OFF();
     ROTATE(cmd.dir);
-    updateElevator(&elevator, (update_status_t){
-                                  .set = {
-                                      .isBrake = true,
-                                      .btwFloor = true},
+    elevator.isBrake = false;
+    elevator.btwFloor = true;
 
-                                  .isBrake = false,
-                                  .btwFloor = true});
   }
 }
 
@@ -1572,14 +1464,11 @@ void vOchestrator(void *pvParams)
       {
         M_STP();
         BRK_ON();
-
-        updateElevator(&elevator, (update_status_t){
-                                      .set = {.pos = true, .state = true, .dir = true, .target = true, .isBrake = true},
-                                      .pos = reachedFloorNum,
-                                      .state = STATE_IDLE,
-                                      .dir = DIR_NONE,
-                                      .target = 0,
-                                      .isBrake = true});
+        elevator.pos = reachedFloorNum;
+        elevator.state = STATE_IDLE;
+        elevator.dir = DIR_NONE;
+        elevator.target = 0;
+        elevator.isBrake = true;
 
         reachedFloorNum = 0;
         Serial.printf("Reached Target Floor %d: Stopping...\n", elevator.pos);
@@ -1687,17 +1576,6 @@ void vOchestrator(void *pvParams)
       break;
 
     case STATE_PAUSED:
-
-      if (cabinState.isDoorClosed == true)
-      {
-        xTaskNotify(xOchestratorHandle, PAUSED_CLEARED, eSetValueWithOverwrite);
-      }
-
-      if (vsgState.shouldPause == false)
-      {
-        xTaskNotify(xOchestratorHandle, PAUSED_CLEARED, eSetValueWithOverwrite);
-      }
-
       break;
 
     case STATE_EMERGENCY:
@@ -1904,16 +1782,12 @@ void vStartRunning(TimerHandle_t xTimer)
     if (elevator.dir != DIR_NONE && elevator.target != 0)
     {
       Serial.println(">> Timer Done: Valid Direction -> GO RUNNING!");
-      updateElevator(&elevator, (update_status_t){
-                                    .set = {.state = true},
-                                    .state = STATE_RUNNING});
+      elevator.state = STATE_RUNNING;
     }
     else
     {
       Serial.println(">> Timer Done: No Direction -> GO IDLE");
-      updateElevator(&elevator, (update_status_t){
-                                    .set = {.state = true},
-                                    .state = STATE_IDLE});
+      elevator.state = STATE_IDLE;
     }
   }
 }
@@ -2498,9 +2372,7 @@ void vNoPowerLanding(void *pvParams)
           break;
 
         BRK_OFF();
-        updateElevator(&elevator, (update_status_t){
-                                      .set = {.isBrake = true},
-                                      .isBrake = false});
+        elevator.isBrake = false;
 
         vTaskDelay(pdMS_TO_TICKS(800));
 
@@ -2513,17 +2385,13 @@ void vNoPowerLanding(void *pvParams)
           break;
 
         BRK_ON();
-        updateElevator(&elevator, (update_status_t){
-                                      .set = {.isBrake = true},
-                                      .isBrake = true});
+        elevator.isBrake = true;
 
         vTaskDelay(pdMS_TO_TICKS(1800));
       }
 
       BRK_ON();
-      updateElevator(&elevator, (update_status_t){
-                                    .set = {.isBrake = true},
-                                    .isBrake = true});
+      elevator.isBrake = true;
     }
     // vTaskDelay(10);
   }
@@ -2602,18 +2470,18 @@ void vPublishTask(void *pvParams)
       snprintf(jsonBuf, sizeof(jsonBuf),
                "{"
                "\"pos\":%d,"
-               "\"state\":\"%s\","
-               "\"dir\":\"%s\","
-               "\"lastDir\":\"%s\","
+               "\"state\":\"%d\","
+               "\"dir\":\"%d\","
+               "\"lastDir\":\"%d\","
                "\"target\":%d,"
                "\"lastTarget\":%d,"
                "\"isBrake\":%s,"
                "\"btwFloor\":%s"
                "}",
                elevator.pos,
-               getStateString(elevator.state),
-               getDirString(elevator.dir),
-               getDirString(elevator.lastDir),
+               elevator.state,
+               elevator.dir,
+               elevator.lastDir,
                elevator.target,
                elevator.lastTarget,
                elevator.isBrake ? "true" : "false",
@@ -2643,8 +2511,6 @@ void vStatusLogger(void *pvParams)
 
   for (;;)
   {
-
-    printElevatorStatus();
 
     if (elevator.pos != lastPOS || elevator.btwFloor != lastBtw)
       if (elevator.pos != lastPOS)
