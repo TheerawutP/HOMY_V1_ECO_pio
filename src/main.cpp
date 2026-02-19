@@ -1180,98 +1180,7 @@ void configureserver()
 //
 //
 
-void eventListener(uint32_t ulNotificationValue, elevatorEvent_t *emg)
-{
-  *emg = (elevatorEvent_t)ulNotificationValue;
 
-  switch (*emg)
-  {
-  case SAFETY_BRAKE:
-    xEventGroupSetBits(xRunningEventGroup, SAFETY_BRAKE_BIT);
-    elevator.state = STATE_EMERGENCY;
-    xTaskNotifyGive(xSafetySlingHandle);
-    break;
-
-  case DOOR_IS_OPEN:
-    xEventGroupSetBits(xRunningEventGroup, DOOR_OPEN_BIT);
-    emoActivate();
-    abortMotion();
-    break;
-
-  case DOOR_IS_CLOSED:
-    break;
-
-  case VTG_ALARM:
-    xEventGroupSetBits(xRunningEventGroup, VTG_BIT);
-    emoActivate();
-    abortMotion();
-    break;
-
-  case VTG_CLEAR:
-    break;
-
-  case VSG_ALARM:
-    xEventGroupSetBits(xRunningEventGroup, VSG_BIT);
-    M_STP();
-    elevator.state = STATE_PAUSED;
-    break;
-
-  case VSG_CLEAR:
-    break;
-
-  case MODBUS_TIMEOUT:
-    xEventGroupSetBits(xRunningEventGroup, MODBUS_DIS_BIT);
-    M_STP();
-    elevator.state = STATE_PAUSED;
-
-    // xTaskNotifyGive(xModbusTimeoutHandle);
-    break;
-
-  case EMERG_PRESSED:
-    xEventGroupSetBits(xRunningEventGroup, EMERG_BIT);
-    emoActivate();
-    elevator.state = STATE_IDLE;
-
-    // xTaskNotifyGive(xEmergeStopHandle);
-    break;
-
-  case EMERG_RELEASED:
-    xEventGroupClearBits(xRunningEventGroup, EMERG_BIT);
-    break;
-
-  case NO_POWER:
-    elevator.state = STATE_EMERGENCY;
-    xTaskNotifyGive(xNoPowerLandingHandle);
-    break;
-
-  case COMMAND_CLEAR:
-    abortMotion();
-    break;
-
-  case FLOOR1_REACHED:
-    elevator.pos = 1;
-    elevator.btwFloor = false;
-    break;
-
-  case FLOOR2_REACHED:
-    elevator.pos = 2;
-    elevator.btwFloor = false;
-    break;
-
-  case POWER_RESTORED:
-    elevator.state = STATE_IDLE;
-    elevator.isBrake = true;
-
-    break;
-
-  case PAUSED_CLEARED:
-    elevator.state = STATE_PENDING;
-    break;
-
-  default:
-    break;
-  }
-}
 
 void getDir(uint8_t target, transitCommand_t *cmd)
 {
@@ -1368,43 +1277,25 @@ void transit(transitCommand_t cmd)
     ROTATE(cmd.dir);
     elevator.isBrake = false;
     elevator.btwFloor = true;
-
   }
 }
 
-// void emergencyHandler(elevatorEvent_t emergeType)
-// {
-//   switch (emergeType)
-//   {
-//   case safetySling:
-//     xTaskNotify(xSafetySlingHandle, 1, eSetValueWithOverwrite);
-//     break;
-
-//   case emergStop:
-//     xTaskNotify(xEmergeStopHandle, 1, eSetValueWithOverwrite);
-
-//     break;
-
-//   case noPowerLanding:
-//     xTaskNotify(xNoPowerLandingHandle, 1, eSetValueWithOverwrite);
-
-//     break;
-
-//   case modbusTimeout:
-//     xTaskNotify(xModbusTimeoutHandle, 1, eSetValueWithOverwrite);
-
-//     break;
-
-//   case clearCommand:
-//     xTaskNotify(xClearCommandHandle, 1, eSetValueWithOverwrite);
-//     break;
-
-//   default:
-//     break;
-//   }
-// }
-
 // central state manager
+void checkUpdatePos(uint8_t reachedFloorNum){
+      if ((reachedFloorNum > 0) && (reachedFloorNum == elevator.target))
+      {
+        M_STP();
+        BRK_ON();
+        elevator.pos = reachedFloorNum;
+        elevator.state = STATE_IDLE;
+        elevator.dir = DIR_NONE;
+        elevator.target = 0;
+        elevator.isBrake = true;
+
+        reachedFloorNum = 0;
+        Serial.printf("Reached Target Floor %d: Stopping...\n", elevator.pos);
+      }
+}
 
 void vOchestrator(void *pvParams)
 {
@@ -1425,60 +1316,107 @@ void vOchestrator(void *pvParams)
 
   uint32_t lastCommandTime = 0;
 
-  // inverter_t localInvState;
-  // cabin_t localCabinState;
-  // vsg_t localVsgState;
-
-  // memset(&localInvState, 0, sizeof(inverter_t));
-  // memset(&localCabinState, 0, sizeof(cabin_t));
-  // memset(&localVsgState, 0, sizeof(vsg_t));
-
   for (;;)
   {
-
-    // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
-    // {
-    //   localInvState = inverterState;
-    //   localCabinState = cabinState;
-    //   localVsgState = vsgState;
-
-    //   xSemaphoreGive(dataMutex);
-    // }
 
     ////////////////////////////listen to all event that would happens///////////////////////////////////
 
     if (xTaskNotifyWait(0x00, 0xFFFFFFFF, &ulNotificationValue, 0) == pdPASS)
     {
-      eventListener(ulNotificationValue, &evtType);
+      // eventListener(ulNotificationValue, &evtType);
 
-      if (evtType == FLOOR1_REACHED)
-      {
-        reachedFloorNum = 1;
-      }
-      else if (evtType == FLOOR2_REACHED)
-      {
-        reachedFloorNum = 2;
-      }
+      evtType = (elevatorEvent_t)ulNotificationValue;
 
-      if ((reachedFloorNum > 0) && (reachedFloorNum == elevator.target))
+      switch (evtType)
       {
+      case SAFETY_BRAKE:
+        xEventGroupSetBits(xRunningEventGroup, SAFETY_BRAKE_BIT);
+        elevator.state = STATE_EMERGENCY;
+        xTaskNotifyGive(xSafetySlingHandle);
+        break;
+
+      case DOOR_IS_OPEN:
+        xEventGroupSetBits(xRunningEventGroup, DOOR_OPEN_BIT);
+        emoActivate();
+        abortMotion();
+        break;
+
+      case DOOR_IS_CLOSED:
+        break;
+
+      case VTG_ALARM:
+        xEventGroupSetBits(xRunningEventGroup, VTG_BIT);
+        emoActivate();
+        abortMotion();
+        break;
+
+      case VTG_CLEAR:
+        break;
+
+      case VSG_ALARM:
+        xEventGroupSetBits(xRunningEventGroup, VSG_BIT);
         M_STP();
-        BRK_ON();
-        elevator.pos = reachedFloorNum;
+        elevator.state = STATE_PAUSED;
+        break;
+
+      case VSG_CLEAR:
+        break;
+
+      case MODBUS_TIMEOUT:
+        xEventGroupSetBits(xRunningEventGroup, MODBUS_DIS_BIT);
+        M_STP();
+        elevator.state = STATE_PAUSED;
+
+        // xTaskNotifyGive(xModbusTimeoutHandle);
+        break;
+
+      case EMERG_PRESSED:
+        xEventGroupSetBits(xRunningEventGroup, EMERG_BIT);
+        emoActivate();
         elevator.state = STATE_IDLE;
-        elevator.dir = DIR_NONE;
-        elevator.target = 0;
+
+        // xTaskNotifyGive(xEmergeStopHandle);
+        break;
+
+      case EMERG_RELEASED:
+        xEventGroupClearBits(xRunningEventGroup, EMERG_BIT);
+        break;
+
+      case NO_POWER:
+        elevator.state = STATE_EMERGENCY;
+        xTaskNotifyGive(xNoPowerLandingHandle);
+        break;
+
+      case COMMAND_CLEAR:
+        abortMotion();
+        break;
+
+      case FLOOR1_REACHED:
+        elevator.pos = 1;
+        elevator.btwFloor = false;
+        checkUpdatePos(elevator.pos);
+        break;
+
+      case FLOOR2_REACHED:
+        elevator.pos = 2;
+        elevator.btwFloor = false;
+        checkUpdatePos(elevator.pos);
+        break;
+
+      case POWER_RESTORED:
+        elevator.state = STATE_IDLE;
         elevator.isBrake = true;
 
-        reachedFloorNum = 0;
-        Serial.printf("Reached Target Floor %d: Stopping...\n", elevator.pos);
+        break;
+
+      case PAUSED_CLEARED:
+        elevator.state = STATE_PENDING;
+        break;
+
+      default:
+        break;
       }
 
-      // else if (evtType == emergStop || evtType == safetySling)
-      // {
-      //   elevator.state = STATE_EMERGENCY;
-      //   emergencyHandler(evtType);
-      // }
     }
 
     /////////////////////////////////slow polling count//////////////////////////////////////////
@@ -1591,6 +1529,20 @@ void vOchestrator(void *pvParams)
 }
 
 // main threads
+// void processCabinCall(uint8_t targetFloor, uint8_t soundTrack, uint8_t ledBit) {
+//     userCommand_t userCommand;
+//     userCommand.target = targetFloor;
+//     userCommand.type = moveToFloor;
+//     userCommand.from = FROM_CABIN;
+
+//     // ส่ง Queue (เช็คเต็มด้วย)
+//     if(xQueueSend(xQueueCommand, &userCommand, 0) == pdTRUE) {
+//         // สั่ง Modbus
+//         writeFrameDFPlayer(soundTrack, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+//         writeBit(cabinState.writtenFrame[1], ledBit, true);
+//         enableTransmit(cabinState.shouldWrite);
+//     }
+// }
 
 void vProcessData(void *pvParams)
 {
@@ -2321,42 +2273,6 @@ void vSafetySling(void *pvParams)
   }
 }
 
-void vEmergStop(void *pvParams)
-{
-  for (;;)
-  {
-    if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY) > 0)
-    {
-      while (elevator.state == STATE_PAUSED)
-      {
-        emoActivate();
-        BRK_ON();
-        M_STP();
-        vTaskDelay(10);
-      }
-    }
-    // vTaskDelay(10);
-  }
-}
-
-void vModbusTimeout(void *pvParams)
-{
-  for (;;)
-  {
-    if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY) > 0)
-    {
-      while (elevator.state == STATE_PAUSED)
-      {
-        emoActivate();
-        BRK_ON();
-        M_STP();
-        vTaskDelay(10);
-      }
-    }
-    // vTaskDelay(10);
-  }
-}
-
 void vNoPowerLanding(void *pvParams)
 {
   for (;;)
@@ -2681,9 +2597,7 @@ void setup()
   xTaskCreate(vOchestrator, "Ochestrator", 4096, NULL, 7, &xOchestratorHandle);
 
   xTaskCreate(vSafetySling, "SafetySling", 1536, NULL, 6, &xSafetySlingHandle);
-  xTaskCreate(vEmergStop, "EmergeStop", 1536, NULL, 6, &xEmergeStopHandle);
 
-  xTaskCreate(vModbusTimeout, "ModbusTimeout", 1536, NULL, 5, &xModbusTimeoutHandle);
   xTaskCreate(vNoPowerLanding, "NoPowerLanding", 1536, NULL, 4, &xNoPowerLandingHandle);
   xTaskCreate(vClearCommand, "ClearCommand", 1536, NULL, 4, &xClearCommandHandle);
 
