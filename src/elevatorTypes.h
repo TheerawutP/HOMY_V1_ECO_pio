@@ -34,6 +34,28 @@ typedef struct
   direction_t dir;
 } transitCommand_t;
 
+enum elevatorEvent_t
+{
+  SAFETY_BRAKE,
+  OVERSPEDD,
+  DOOR_IS_OPEN,
+  DOOR_IS_CLOSED,
+  OVERTORQUE,
+  VTG_ALARM,
+  VSG_ALARM,
+  VTG_CLEAR,
+  VSG_CLEAR,
+  MODBUS_TIMEOUT,
+  NO_POWER,
+  COMMAND_CLEAR,
+  FLOOR1_REACHED,
+  FLOOR2_REACHED,
+  POWER_RESTORED,
+  PAUSED_CLEARED,
+  EMERG_PRESSED,
+  EMERG_RELEASED
+};
+
 typedef struct
 {
   uint8_t pos;
@@ -44,6 +66,7 @@ typedef struct
   uint8_t lastTarget;
   bool isBrake;
   bool btwFloor;
+  elevatorEvent_t evt;
   bool hasChanged;
 } status_t;
 
@@ -72,25 +95,7 @@ typedef struct {
     bool hasChanged;
 } update_status_t;
 
-enum elevatorEvent_t
-{
-  SAFETY_BRAKE,
-  DOOR_IS_OPEN,
-  DOOR_IS_CLOSED,
-  VTG_ALARM,
-  VSG_ALARM,
-  VTG_CLEAR,
-  VSG_CLEAR,
-  MODBUS_TIMEOUT,
-  NO_POWER,
-  COMMAND_CLEAR,
-  FLOOR1_REACHED,
-  FLOOR2_REACHED,
-  POWER_RESTORED,
-  PAUSED_CLEARED,
-  EMERG_PRESSED,
-  EMERG_RELEASED
-};
+
 
 enum commandType_t
 {
