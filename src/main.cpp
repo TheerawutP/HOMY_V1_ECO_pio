@@ -1194,7 +1194,7 @@ void getDir(uint8_t target, transitCommand_t *cmd)
 
     elevator.state = STATE_PENDING;
     elevator.dir = newDir;
-    elevator.lastTarget = elevator.target;
+    elevator.lastTarget = newTarget;
     elevator.target = newTarget;
 
     if (newDir == DIR_UP)
