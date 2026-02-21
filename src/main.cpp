@@ -28,6 +28,7 @@
 #define BRK 5          // brake
 #define NoPower 25
 #define safetySling 26
+#define speedGovernor 4
 #define EMO 21 // emergency stop
 
 // #define CS 21 //direct to 3.3v
@@ -173,6 +174,11 @@ vsg_t vsgState = {
     .isAlarm = {0},
     .shouldPause = false};
 
+volatile uint8_t overSpeed_counter = 0;
+volatile uint32_t lastTimeCount = 0;
+
+const uint32_t minSpeedPeriod = 200;
+const uint32_t overSpeed_threshold = 5;
 // while sleep param
 
 // other helpers
@@ -1344,7 +1350,7 @@ void vOchestrator(void *pvParams)
           command.dir = DIR_UP;
 
           elevator.target = elevator.pos + 1;
-          command.target = elevator.pos;        
+          command.target = elevator.pos;
         }
         else
         {
@@ -1940,18 +1946,28 @@ void vPollingSafetySling(void *pvParams)
 
 void ARDUINO_ISR_ATTR ISR_OverSpeed()
 {
-  // unsigned long now = millis();
-  // if (now - lastTimeCount < MIN_COUNT_DURATION)
-  //   overSpeed_counter++;
-  //   return;
-  // lastTimeCount = now;
-  // BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  unsigned long now = millis();
+  if (now - lastTimeCount < minSpeedPeriod)
+  {
+    overSpeed_counter++;
+  }
+  else
+  {
+    overSpeed_counter = 0;
+  }
 
-  // if(overSpeed_counter > overSpeed_threshold){
-  //    // Serial.println("OverSpeed!!!!");
-  //    xTaskNotifyFromISR(xSpeedGovernorHandle);
-  //  }
-  //  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+  lastTimeCount = now;
+
+  if (overSpeed_counter > overSpeed_threshold)
+  {
+    Serial.println("OverSpeed!!!!");
+    emoActivate();
+    M_STP();
+    BRK_ON();
+
+    overSpeed_counter = 0;
+  }
+  // portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 // safety task handlers
@@ -2234,6 +2250,10 @@ void setup()
   pinMode(NoPower, INPUT_PULLUP); // normal pull-up by using external resistor
   // attachInterrupt(NP, ISR_Landing, FALLING);
   pinMode(safetySling, INPUT_PULLUP);
+
+  pinMode(speedGovernor, INPUT_PULLUP);
+  attachInterrupt(speedGovernor, ISR_OverSpeed, FALLING);
+
   // attachInterrupt(safetySling, ISR_Safety, FALLING);
   // pinMode(CS, OUTPUT);
   // digitalWrite(CS, HIGH); // rf always waked up
