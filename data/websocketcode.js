@@ -136,21 +136,21 @@ function onMessage(evt) {
 
             if (m_json_obj.state == STATE_RUNNING || m_json_obj.state == STATE_PENDING) {
                 if (m_json_obj.up === true) {
-                    btnUp?.classList.add("active");
+                    btnUp?.classList.add("up-active");
                 } else {
-                    btnUp?.classList.remove("active");
+                    btnUp?.classList.remove("up-active");
                 }
 
                 if (m_json_obj.down === true) {
-                    btnDown?.classList.add("active");
+                    btnDown?.classList.add("down-active");
                 } else {
-                    btnDown?.classList.remove("active");
+                    btnDown?.classList.remove("down-active");
                 }
 
             } else {
                 // ถ้าลิฟต์จอด (IDLE) ให้ดับไฟปุ่มทั้งหมด
-                btnUp?.classList.remove("active");
-                btnDown?.classList.remove("active");
+                btnUp?.classList.remove("up-active");
+                btnDown?.classList.remove("down-active");
             }
 
             // if ('Mode' in m_json_obj) {

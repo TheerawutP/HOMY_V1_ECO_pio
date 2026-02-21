@@ -70,10 +70,24 @@
         </div>
 
       </div>
-      <div class="arrow-row">
+
+      <script src="https://unpkg.com/lucide@latest"></script>
+
+
+      <!-- <div class="arrow-row">
         <button class="arrow-btn text-white" id="btnUp" onclick="on_Button_UP_pressed()">▲</button>
         <button class="arrow-btn text-white" id="btnDown" onclick="on_Button_DOWN_pressed()">▼</button>
+      </div> -->
+      <div class="arrow-row">
+        <button class="arrow-btn" id="btnUp" onclick="on_Button_UP_pressed()">
+          <i data-lucide="chevron-up"></i>
+        </button>
+        <button class="arrow-btn" id="btnDown" onclick="on_Button_DOWN_pressed()">
+          <i data-lucide="chevron-down"></i>
+        </button>
       </div>
+
+      <script>lucide.createIcons();</script>
 
       <!-- STOP -->
       <button class="stop-btn text-white" id="btnStop" onclick="on_Button_STOP_pressed()">STOP</button>
