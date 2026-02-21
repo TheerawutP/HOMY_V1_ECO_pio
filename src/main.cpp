@@ -117,7 +117,7 @@ TaskHandle_t xPollingModbusHandle;
 TaskHandle_t xPollingFloorSensor1Handle;
 TaskHandle_t xPollingFloorSensor2Handle;
 TaskHandle_t xPollingNoPowerHandle;
-TaskHandle_t xSafetySlingHandle;
+TaskHandle_t xPollingSafetySlingHandle;
 TaskHandle_t xEmergeStopHandle;
 TaskHandle_t xNoPowerLandingHandle;
 TaskHandle_t xModbusTimeoutHandle;
@@ -1283,6 +1283,10 @@ void checkUpdatePos(uint8_t reachedFloorNum)
 {
   if ((reachedFloorNum > 0) && (reachedFloorNum == elevator.target))
   {
+    if (elevator.state == STATE_EMERGENCY)
+    {
+      Serial.println("Clear Emergency!!!");
+    }
     M_STP();
     BRK_ON();
     elevator.pos = reachedFloorNum;
@@ -1331,18 +1335,23 @@ void vOchestrator(void *pvParams)
 
       case SAFETY_BRAKE:
         // xEventGroupSetBits(xRunningEventGroup, SAFETY_BRAKE_BIT);
-        emoActivate();
-        abortMotion();
+        // emoActivate();
+        // abortMotion();
         elevator.state = STATE_EMERGENCY;
 
         if (elevator.dir == DIR_UP)
         {
           command.dir = DIR_UP;
-          command.target = elevator.pos + 1;
+
+          elevator.target = elevator.pos + 1;
+          command.target = elevator.pos;        
         }
         else
         {
+
           command.dir = DIR_UP;
+
+          elevator.target = elevator.pos;
           command.target = elevator.pos;
         }
 
@@ -1404,6 +1413,7 @@ void vOchestrator(void *pvParams)
 
       case NO_POWER:
         elevator.state = STATE_EMERGENCY;
+        elevator.target = MIN_FLOOR;
         xTaskNotify(xNoPowerLandingHandle, 1, eSetValueWithOverwrite);
         break;
 
@@ -1749,11 +1759,13 @@ void vPollingModbusMaster(void *pvParams)
         }
         else
         {
-
-          xTaskNotify(xOchestratorHandle, DOOR_IS_OPEN, eSetValueWithOverwrite);
+          if (elevator.state != STATE_EMERGENCY)
+          {
+            xTaskNotify(xOchestratorHandle, DOOR_IS_OPEN, eSetValueWithOverwrite);
+          }
         }
 
-        if (cabinState.vtgAlarm == true)
+        if (cabinState.vtgAlarm == true && elevator.state != STATE_EMERGENCY)
         {
           xTaskNotify(xOchestratorHandle, VTG_ALARM, eSetValueWithOverwrite);
         }
@@ -2221,7 +2233,8 @@ void setup()
 
   pinMode(NoPower, INPUT_PULLUP); // normal pull-up by using external resistor
   // attachInterrupt(NP, ISR_Landing, FALLING);
-
+  pinMode(safetySling, INPUT_PULLUP);
+  // attachInterrupt(safetySling, ISR_Safety, FALLING);
   // pinMode(CS, OUTPUT);
   // digitalWrite(CS, HIGH); // rf always waked up
 
@@ -2260,7 +2273,7 @@ void setup()
 
   xStartRunningTimer = xTimerCreate("startRunning", WAIT_TO_RUNNING_MS, pdFALSE, NULL, vStartRunning);
 
-  xTaskCreate(vOchestrator, "Ochestrator", 4096, NULL, 7, &xOchestratorHandle);
+  xTaskCreate(vOchestrator, "Ochestrator", 4096, NULL, 5, &xOchestratorHandle);
 
   // xTaskCreate(vSafetySling, "SafetySling", 1536, NULL, 6, &xSafetySlingHandle);
 
@@ -2275,6 +2288,7 @@ void setup()
   xTaskCreate(vPollingFloorSensor1, "PollingFloorSensor", 2048, NULL, 4, &xPollingFloorSensor1Handle);
   xTaskCreate(vPollingFloorSensor2, "PollingFloorSensor2", 2048, NULL, 4, &xPollingFloorSensor2Handle);
   xTaskCreate(vPollingNoPower, "PollingNoPower", 2048, NULL, 4, &xPollingNoPowerHandle);
+  xTaskCreate(vPollingSafetySling, "PollingSafetySling", 2048, NULL, 4, &xPollingSafetySlingHandle);
 
   xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 2, NULL);
   xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 2, NULL);
