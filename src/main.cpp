@@ -1352,23 +1352,25 @@ void vOchestrator(void *pvParams)
 
       case DOOR_IS_OPEN:
         // xEventGroupSetBits(xRunningEventGroup, DOOR_OPEN_BIT);
-        // emoActivate();
-        // abortMotion();
-        // elevator.state = STATE_PAUSED;
+        Serial.println("DOOR IS OPEN!!!");
+        emoActivate();
+        abortMotion();
+        elevator.state = STATE_PAUSED;
         break;
 
       case DOOR_IS_CLOSED:
-        // emoDeactivate();
-        // elevator.state = STATE_IDLE;
+        Serial.println("DOOR IS CLOSED!!!");
+        emoDeactivate();
+        elevator.state = STATE_PENDING;
         // xEventGroupClearBits(xRunningEventGroup, DOOR_OPEN_BIT);
 
         break;
 
       case VTG_ALARM:
         // xEventGroupSetBits(xRunningEventGroup, VTG_BIT);
-        // emoActivate();
-        // abortMotion();
-        // elevator.state = STATE_IDLE;
+        emoActivate();
+        abortMotion();
+        elevator.state = STATE_IDLE;
         break;
 
         // case VTG_CLEAR:
@@ -1376,13 +1378,13 @@ void vOchestrator(void *pvParams)
         // break;
 
       case VSG_ALARM:
-        // xEventGroupSetBits(xRunningEventGroup, VSG_BIT);
-        // M_STP();
-        // elevator.state = STATE_PAUSED;
+        xEventGroupSetBits(xRunningEventGroup, VSG_BIT);
+        M_STP();
+        elevator.state = STATE_PAUSED;
         break;
 
       case VSG_CLEAR:
-        // elevator.state = STATE_PENDING;
+        elevator.state = STATE_PENDING;
         break;
 
       case MODBUS_TIMEOUT:
@@ -1401,8 +1403,8 @@ void vOchestrator(void *pvParams)
         //   break;
 
       case NO_POWER:
-        // elevator.state = STATE_EMERGENCY;
-        // xTaskNotify(xNoPowerLandingHandle, 1, eSetValueWithOverwrite);
+        elevator.state = STATE_EMERGENCY;
+        xTaskNotify(xNoPowerLandingHandle, 1, eSetValueWithOverwrite);
         break;
 
       case COMMAND_CLEAR:
@@ -1422,9 +1424,10 @@ void vOchestrator(void *pvParams)
         break;
 
       case POWER_RESTORED:
-        // BRK_ON();
-        // elevator.state = STATE_IDLE;
-        // elevator.isBrake = true;
+        BRK_ON();
+        elevator.state = STATE_IDLE;
+        elevator.isBrake = true;
+        xQueueReset(xQueueCommand);
         break;
 
       case PAUSED_CLEARED:
@@ -1675,31 +1678,31 @@ void vPollingModbusMaster(void *pvParams)
     bool needWrite = false;
     uint16_t valToWrite = 0;
 
-    // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
-    // {
-    //   if (cabinState.shouldWrite)
-    //   {
-    //     needWrite = true;
-    //     valToWrite = cabinState.writtenFrame[1];
-    //     cabinState.shouldWrite = false;
-    //   }
-    //   xSemaphoreGive(dataMutex);
-    // }
+    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+    {
+      if (cabinState.shouldWrite)
+      {
+        needWrite = true;
+        valToWrite = cabinState.writtenFrame[1];
+        cabinState.shouldWrite = false;
+      }
+      xSemaphoreGive(dataMutex);
+    }
 
-    // if (needWrite)
-    // {
-    //   node.begin(CABIN_ID, Serial1);
-    //   result = node.writeSingleRegister(0x0001, valToWrite);
-    //   // test_counter++;
-    //   // node.begin(VSG_ID, Serial1);
-    //   // result = node.writeSingleRegister(0x0001, test_counter);
+    if (needWrite)
+    {
+      node.begin(CABIN_ID, Serial1);
+      result = node.writeSingleRegister(0x0001, valToWrite);
+      // test_counter++;
+      // node.begin(VSG_ID, Serial1);
+      // result = node.writeSingleRegister(0x0001, test_counter);
 
-    //   if (result != node.ku8MBSuccess)
-    //   {
-    //     Serial.printf("Write Error: 0x%02X\n", result);
-    //   }
-    //   vTaskDelay(pdMS_TO_TICKS(20)); // silence between mb package
-    // }
+      if (result != node.ku8MBSuccess)
+      {
+        Serial.printf("Write Error: 0x%02X\n", result);
+      }
+      vTaskDelay(pdMS_TO_TICKS(50)); // silence between mb package
+    }
 
     // --- 2. POLLING STATE MACHINE:
     if (xSemaphoreTake(modbusMutex, pdMS_TO_TICKS(10)) == pdTRUE)
@@ -1739,10 +1742,14 @@ void vPollingModbusMaster(void *pvParams)
 
         if (cabinState.isDoorClosed == true)
         {
-          xTaskNotify(xOchestratorHandle, DOOR_IS_CLOSED, eSetValueWithOverwrite);
+          if (elevator.state == STATE_PAUSED)
+          {
+            xTaskNotify(xOchestratorHandle, DOOR_IS_CLOSED, eSetValueWithOverwrite);
+          }
         }
         else
         {
+
           xTaskNotify(xOchestratorHandle, DOOR_IS_OPEN, eSetValueWithOverwrite);
         }
 
@@ -1770,8 +1777,8 @@ void vPollingModbusMaster(void *pvParams)
         }
         else
         {
-          if(elevator.state == STATE_PAUSED)
-          xTaskNotify(xOchestratorHandle, VSG_CLEAR, eSetValueWithOverwrite);
+          if (elevator.state == STATE_PAUSED)
+            xTaskNotify(xOchestratorHandle, VSG_CLEAR, eSetValueWithOverwrite);
         }
 
         read_state = INVERTER_STA;
@@ -1953,7 +1960,7 @@ void vNoPowerLanding(void *pvParams)
 
         BRK_OFF();
         elevator.isBrake = false;
-
+        Serial.println("Brake OFF !");
         vTaskDelay(pdMS_TO_TICKS(800));
 
         // if (elevator.pos == MIN_FLOOR && elevator.btwFloor == false) {
@@ -1967,6 +1974,7 @@ void vNoPowerLanding(void *pvParams)
         BRK_ON();
         elevator.isBrake = true;
 
+        Serial.println("Brake ON !");
         vTaskDelay(pdMS_TO_TICKS(1800));
       }
 
@@ -2291,7 +2299,6 @@ void loop()
   {
     lastDebugTime = millis();
 
-  
     status_t dbg_elevator;
     cabin_t dbg_cabin;
     inverter_t dbg_inverter;
@@ -2301,49 +2308,49 @@ void loop()
     // --- BLOCK 1: Snapshot Data (Copy Thread-Safe) ---
     // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
     // {
-      dbg_elevator = elevator;
-      dbg_cabin = cabinState;
-      dbg_inverter = inverterState;
-      dbg_vsg = vsgState;
+    dbg_elevator = elevator;
+    dbg_cabin = cabinState;
+    dbg_inverter = inverterState;
+    dbg_vsg = vsgState;
     //   xSemaphoreGive(dataMutex);
     // }
 
-  // //   // Event Group (Safety Flags)
-  // //   if (xRunningEventGroup != NULL) {
-  // //       dbg_events = xEventGroupGetBits(xRunningEventGroup);
-  // //   }
+    // //   // Event Group (Safety Flags)
+    // //   if (xRunningEventGroup != NULL) {
+    // //       dbg_events = xEventGroupGetBits(xRunningEventGroup);
+    // //   }
 
-  // //   Serial.println("\n--- [ SYSTEM DEBUGGER ] ---");
-  // //   Serial.printf("Uptime: %lu ms | Heap: %u bytes\n", millis(), ESP.getFreeHeap());
+    // //   Serial.println("\n--- [ SYSTEM DEBUGGER ] ---");
+    // //   Serial.printf("Uptime: %lu ms | Heap: %u bytes\n", millis(), ESP.getFreeHeap());
 
-  //   // --- BLOCK 2: Elevator Logic State ---
+    //   // --- BLOCK 2: Elevator Logic State ---
     Serial.println(">> [LOGIC STATE]");
     Serial.printf("  State: %d (%d)\n", dbg_elevator.state, dbg_elevator.state);
     Serial.printf("  Pos: %d | Target: %d | LastTarget: %d\n", dbg_elevator.pos, dbg_elevator.target, dbg_elevator.lastTarget);
     Serial.printf("  Dir: %d | Brake Logic: %s\n", dbg_elevator.dir, dbg_elevator.isBrake ? "LOCKED" : "RELEASED");
+    Serial.print("btwFloor: ");
+    Serial.println(elevator.btwFloor);
+    // //   // --- BLOCK 3: Hardware I/O  ---
+    // //   Serial.println(">> [HARDWARE I/O]");
+    // //   Serial.printf("  Floor Sensors: FL1=%d, FL2=%d (0=Active)\n", digitalRead(floorSensor1), digitalRead(floorSensor2));
+    // //   Serial.printf("  Power Monitor: %d (0=NoPower)\n", digitalRead(NoPower));
+    // //   Serial.printf("  Relays: UP=%d, DW=%d, BRK=%d, EMO=%d\n", digitalRead(R_UP), digitalRead(R_DW), digitalRead(BRK), digitalRead(EMO));
 
-  // //   // --- BLOCK 3: Hardware I/O  ---
-  // //   Serial.println(">> [HARDWARE I/O]");
-  // //   Serial.printf("  Floor Sensors: FL1=%d, FL2=%d (0=Active)\n", digitalRead(floorSensor1), digitalRead(floorSensor2));
-  // //   Serial.printf("  Power Monitor: %d (0=NoPower)\n", digitalRead(NoPower));
-  // //   Serial.printf("  Relays: UP=%d, DW=%d, BRK=%d, EMO=%d\n", digitalRead(R_UP), digitalRead(R_DW), digitalRead(BRK), digitalRead(EMO));
-
-  //   // --- BLOCK 4: Modbus Data (Slave Status) ---
+    //   // --- BLOCK 4: Modbus Data (Slave Status) ---
     Serial.println(">> [MODBUS DATA]");
     Serial.printf("  [INV] Hz: %d | Torque: %d | DI: %d\n", dbg_inverter.running_hz, dbg_inverter.torque, dbg_inverter.digitalInput);
     Serial.printf("  [CABIN] DoorClosed: %d | Emerg: %d | Busy: %d\n", dbg_cabin.isDoorClosed, dbg_cabin.isEmergStop, dbg_cabin.isBusy);
     Serial.printf("  [VSG] PauseReq: %d | Alarm[0]: %d\n", dbg_vsg.shouldPause, dbg_vsg.isAlarm[0]);
 
-  // //   // --- BLOCK 5: Event Flags (Safety Blocks) ---
-  // //   Serial.println(">> [SAFETY FLAGS]");
-  // //   Serial.printf("  Raw Bits: 0x%06X\n", dbg_events);
-  // //   Serial.printf("  - Door Open: %d\n", (dbg_events & DOOR_OPEN_BIT) ? 1 : 0);
-  // //   Serial.printf("  - Modbus Dis: %d\n", (dbg_events & MODBUS_DIS_BIT) ? 1 : 0);
-  // //   Serial.printf("  - Emergency: %d\n", (dbg_events & EMERG_BIT) ? 1 : 0);
+    // //   // --- BLOCK 5: Event Flags (Safety Blocks) ---
+    // //   Serial.println(">> [SAFETY FLAGS]");
+    // //   Serial.printf("  Raw Bits: 0x%06X\n", dbg_events);
+    // //   Serial.printf("  - Door Open: %d\n", (dbg_events & DOOR_OPEN_BIT) ? 1 : 0);
+    // //   Serial.printf("  - Modbus Dis: %d\n", (dbg_events & MODBUS_DIS_BIT) ? 1 : 0);
+    // //   Serial.printf("  - Emergency: %d\n", (dbg_events & EMERG_BIT) ? 1 : 0);
 
-  //   Serial.println("---------------------------");
+    Serial.println("---------------------------");
   }
-  
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
