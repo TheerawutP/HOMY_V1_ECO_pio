@@ -33,16 +33,20 @@
   <link rel="apple-touch-icon" href="app-icon.png">
   <link rel="icon" type="image/png" sizes="192x192" href="app-icon.png">
   <link rel="shortcut icon" href="app-icon.png">
-  
+
 </head>
 
 
 <body>
   <div class="main-container">
     <nav class="navbar navbar-dark bg-transparent w-100 d-flex justify-content-center pt-4">
-      <a href="#" class="navbar-brand m-0 text-center" style="font-family: 'Verdana', sans-serif;">
-        <span style="font-weight: bold; font-style: italic; font-size: 1.2rem;">XIMPLEX</span><br>
-        <span style="font-style: normal; font-size: 2.5rem; font-weight: 300;">LuckD</span>
+      <a href="#" class="navbar-brand m-0 text-center">
+
+        <div class="logo-container">
+          <img src="ximplex_by_flinkone.png" alt="XIMPLEX Logo" class="main-logo">
+        </div>
+
+        <div class="brand-subname">LuckD</div>
       </a>
     </nav>
 
@@ -76,8 +80,8 @@
           <i data-lucide="arrow-down"></i>
         </button>
 
-        <button class="lift-btn" id="btnStop" onclick="on_Button_STOP_pressed()">
-          <span class="stop-text">stop</span>
+        <button class="lift-btn stop-style" id="btnStop" onclick="on_Button_STOP_pressed()">
+          <i id="stopIcon" data-lucide="pause"></i>
         </button>
 
         <button class="lift-btn bell-style" id="btnEmergency">

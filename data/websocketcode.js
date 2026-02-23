@@ -106,6 +106,9 @@ function addData(label, data) {
     dataPlot.update();
 }
 
+
+
+
 // Called when a message is received from the server
 function onMessage(evt) {
     const STATE_IDLE = 0;
@@ -126,6 +129,8 @@ function onMessage(evt) {
             var btnUp = document.getElementById("btnUp");
             var btnDown = document.getElementById("btnDown");
             // var btnEmg = document.getElementById("btnEmergency");
+
+
 
             if ('floorValue' in m_json_obj) {
                 var floorNumDisplay = document.querySelector("#FloorValue .floor-num");
@@ -208,5 +213,7 @@ function sendDataRate() {
 
 // Call the init function as soon as the page loads
 window.addEventListener("load", init, false);
+
+
 
 

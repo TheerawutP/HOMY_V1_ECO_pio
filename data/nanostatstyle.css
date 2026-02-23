@@ -1,6 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap');
-
-body {
+/* @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap'); */
+@import url('https://fonts.googleapis.com/css2?family=Forum&family=Italiana&family=Julius+Sans+One&family=Poiret+One&display=swap');body {
   background-color: hsl(216, 99%, 90%);
 }
 
@@ -72,59 +71,74 @@ input[type=number] {
 
 
 .seven-seg {
-/* ไม่กำหนด width/height ตายตัวแล้ว ปล่อยให้อิสระ */
-    background: transparent; /* เอาพื้นหลังสีดำออก */
-    border: none;            /* เอาเส้นขอบออก */
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    margin: 0;
+  /* ไม่กำหนด width/height ตายตัวแล้ว ปล่อยให้อิสระ */
+  background: transparent;
+  /* เอาพื้นหลังสีดำออก */
+  border: none;
+  /* เอาเส้นขอบออก */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
 }
 
 .seven-seg .floor-num {
-color: #ffffff;
-    font-size: 100px; /* ขยายให้ใหญ่สะใจ เพราะไม่มีกรอบมาจำกัดแล้ว */
-    font-weight: 250; /* ใช้ตัวบางจะดูแพง (ถ้ายากให้หนาเปลี่ยนเป็น 600) */
-    font-family: 'Inter', sans-serif;
-    line-height: 1;
-    
-    /* สร้างเอฟเฟคแสงฟุ้งสีขาวรอบๆ ตัวเลข */
-    text-shadow: 0 0 30px rgba(255, 255, 255, 0.8), 
-                 0 0 10px rgba(255, 255, 255, 0.5);
+  color: #ffffff;
+  font-size: 100px;
+  /* ขยายให้ใหญ่สะใจ เพราะไม่มีกรอบมาจำกัดแล้ว */
+  font-weight: 250;
+  /* ใช้ตัวบางจะดูแพง (ถ้ายากให้หนาเปลี่ยนเป็น 600) */
+  font-family: 'Inter', sans-serif;
+  line-height: 1;
+
+  /* สร้างเอฟเฟคแสงฟุ้งสีขาวรอบๆ ตัวเลข */
+  text-shadow: 0 0 30px rgba(255, 255, 255, 0.8),
+    0 0 10px rgba(255, 255, 255, 0.5);
 }
 
 .seven-seg .floor-msg {
-font-family: 'Inter', sans-serif;
-    font-size: 20px;
-    font-weight: 300;
-    color: #ffffff !important; /* บังคับให้เป็นสีขาว 100% ตัดปัญหาสีฟ้า */
-    text-transform: uppercase;
-    letter-spacing: 3px;
-    margin-top: 15px;
-    text-shadow: 0 0 15px rgba(255, 255, 255, 0.8);
-    
-    /* 🌟 จุดสำคัญ: จองพื้นที่ไว้เสมอแต่ทำให้มองไม่เห็น แทนการเอาออกไปจากหน้าจอ */
-    display: block;  /* ให้มันกินพื้นที่ไว้ */
-    height: 20px;    /* ล็อคความสูงของบรรทัดไว้เลย จะได้ไม่ขยับ */
-    opacity: 0;      /* โปร่งใส 100% (ซ่อนไว้) */
-visibility: hidden; /* 🌟 ใช้ visibility ซ่อนไว้ (จองที่ไว้แล้วแต่ล่องหน) */
+  font-family: 'Inter', sans-serif;
+  font-size: 20px;
+  font-weight: 300;
+  color: #ffffff !important;
+  /* บังคับให้เป็นสีขาว 100% ตัดปัญหาสีฟ้า */
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  margin-top: 15px;
+  text-shadow: 0 0 15px rgba(255, 255, 255, 0.8);
+
+  /* 🌟 จุดสำคัญ: จองพื้นที่ไว้เสมอแต่ทำให้มองไม่เห็น แทนการเอาออกไปจากหน้าจอ */
+  display: block;
+  /* ให้มันกินพื้นที่ไว้ */
+  height: 20px;
+  /* ล็อคความสูงของบรรทัดไว้เลย จะได้ไม่ขยับ */
+  opacity: 0;
+  /* โปร่งใส 100% (ซ่อนไว้) */
+  visibility: hidden;
+  /* 🌟 ใช้ visibility ซ่อนไว้ (จองที่ไว้แล้วแต่ล่องหน) */
 }
 
 .seven-seg .floor-msg.show {
-    visibility: visible; /* 🌟 ยกเลิกล่องหน */
-    animation: textBlink 1s infinite; /* สั่งกระพริบ ทุกๆ 1 วินาที */
+  visibility: visible;
+  /* 🌟 ยกเลิกล่องหน */
+  animation: textBlink 1s infinite;
+  /* สั่งกระพริบ ทุกๆ 1 วินาที */
 }
 
 @keyframes textBlink {
-    0%, 100% { 
-        opacity: 1; 
-        text-shadow: 0 0 15px rgba(255, 255, 255, 0.9); 
-    }
-    50% { 
-        opacity: 0.1; /* ดับไฟลงเกือบมืดสนิท */
-        text-shadow: none; 
-    }
+
+  0%,
+  100% {
+    opacity: 1;
+    text-shadow: 0 0 15px rgba(255, 255, 255, 0.9);
+  }
+
+  50% {
+    opacity: 0.1;
+    /* ดับไฟลงเกือบมืดสนิท */
+    text-shadow: none;
+  }
 }
 
 
@@ -172,7 +186,8 @@ body {
   align-items: center;
   /* ทำให้ปุ่มแต่ละใบเรียงตรงกันเป๊ะ */
   gap: 0.6vh;
-  margin-top: 0px; /* ปรับตัวเลข 40px ให้มากหรือน้อยได้ตามใจชอบเลยครับ */
+  margin-top: 0px;
+  /* ปรับตัวเลข 40px ให้มากหรือน้อยได้ตามใจชอบเลยครับ */
 }
 
 /* สไตล์ปุ่มวงกลมพื้นฐาน */
@@ -250,16 +265,55 @@ body {
 }
 
 #btnStop:active {
-    transform: scale(0.95); /* ทำให้ปุ่มยุบลงนิดนึงเหมือนถูกกดจริง */
-    background: rgba(255, 255, 255, 0.2);
-    box-shadow: 0 0 20px rgba(255, 255, 255, 0.8);
+  transform: scale(0.95);
+  /* ทำให้ปุ่มยุบลงนิดนึงเหมือนถูกกดจริง */
+  background: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.8);
 }
 
 /* 2. คลาสพิเศษสำหรับให้เรืองแสงค้างไว้แป๊บนึงแม้จะปล่อยนิ้วแล้ว */
 .stop-active {
-    background: rgba(255, 255, 255, 0.3) !important; /* พื้นหลังสว่างขึ้น */
-    box-shadow: 0 0 40px rgba(255, 255, 255, 1) !important; /* แสงฟุ้งกระจาย */
-    border-color: #ffffff !important;
-    transform: scale(1.05); /* เด้งขยายขึ้นมานิดนึง */
-    transition: all 0.6s ease-out; /* แอนิเมชันตอนไฟติดให้ไวขึ้น */
+  background: rgba(255, 255, 255, 0.3) !important;
+  /* พื้นหลังสว่างขึ้น */
+  box-shadow: 0 0 40px rgba(255, 255, 255, 1) !important;
+  /* แสงฟุ้งกระจาย */
+  border-color: #ffffff !important;
+  transform: scale(1.05);
+  /* เด้งขยายขึ้นมานิดนึง */
+  transition: all 0.6s ease-out;
+  /* แอนิเมชันตอนไฟติดให้ไวขึ้น */
+}
+
+
+
+
+.logo-container {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 0 20px;
+}
+
+/* ปรับขนาดรูปโลโก้ */
+.main-logo {
+  max-width: 220px;
+  /* ปรับขนาดความกว้างตามใจชอบ */
+  height: auto;
+  filter: brightness(0) invert(1);
+  /* 🌟 ทริค: เปลี่ยนโลโก้สีดำ/เทา ให้กลายเป็นสีขาวสว่าง */
+  opacity: 0.9;
+}
+
+.brand-subname {
+    font-family: 'Forum', serif; 
+    
+    font-size: 2rem;
+    font-weight: 200; /* 🌟 ใช้เลข 300 เส้นจะบางเฉียบ ดูหรูมาก */
+    color: #ffffff;
+    margin-top: -5px; 
+    
+    letter-spacing: 10px; 
+    text-transform: uppercase; 
+    
+    text-shadow: 0 0 15px rgba(255, 255, 255, 0.4);
 }
