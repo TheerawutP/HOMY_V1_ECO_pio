@@ -43,6 +43,7 @@
 #define INVERTER_DI_STOP 992
 #define INVERTER_DI_EMO 5092
 
+#define SF_0000 0
 #define SF_1001 1  // going up
 #define SF_1002 2  // going dw
 #define SF_1003 3  // reaching
@@ -1203,25 +1204,24 @@ void getDir(uint8_t target, transitCommand_t *cmd)
     elevator.lastTarget = newTarget;
     elevator.target = newTarget;
 
+    // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+    // {
     if (newDir == DIR_UP)
     {
-      trackNum = 1;
-      dirBit = 1;
+      writeFrameDFPlayer(SF_1001, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+      enableTransmit(cabinState.shouldWrite);
+      writeBit(cabinState.writtenFrame[1], 2, false);
+      writeBit(cabinState.writtenFrame[1], 1, true);
     }
     else
     {
-      trackNum = 2;
-      dirBit = 2;
-    }
-
-    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
-    {
-
-      writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+      writeFrameDFPlayer(SF_1002, cabinState.writtenFrame[1], cabinState.isBusy, 6);
       enableTransmit(cabinState.shouldWrite);
-      writeBit(cabinState.writtenFrame[1], dirBit, true);
-      xSemaphoreGive(dataMutex);
+      writeBit(cabinState.writtenFrame[1], 2, true);
+      writeBit(cabinState.writtenFrame[1], 1, false);
     }
+    //   xSemaphoreGive(dataMutex);
+    // }
   }
   else
   {
@@ -1244,24 +1244,22 @@ void getDir(uint8_t target, transitCommand_t *cmd)
       elevator.dir = newDir;
       elevator.target = newTarget;
 
+      // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+      // {
       if (newDir == DIR_UP)
       {
-        trackNum = 1;
-        dirBit = 1;
+        writeFrameDFPlayer(SF_1001, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+        enableTransmit(cabinState.shouldWrite);
+        writeBit(cabinState.writtenFrame[1], 1, true);
       }
       else
       {
-        trackNum = 2;
-        dirBit = 2;
-      }
-
-      if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
-      {
-        writeFrameDFPlayer(trackNum, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+        writeFrameDFPlayer(SF_1002, cabinState.writtenFrame[1], cabinState.isBusy, 6);
         enableTransmit(cabinState.shouldWrite);
-        writeBit(cabinState.writtenFrame[1], dirBit, true);
-        xSemaphoreGive(dataMutex);
+        writeBit(cabinState.writtenFrame[1], 2, true); // light bit
       }
+      //   xSemaphoreGive(dataMutex);
+      // }
     }
     else
     {
@@ -1361,19 +1359,52 @@ void vOchestrator(void *pvParams)
           command.target = elevator.pos;
         }
 
+        // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+        // {
+        writeFrameDFPlayer(0, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+        enableTransmit(cabinState.shouldWrite);
+        writeBit(cabinState.writtenFrame[1], 4, true);
+        writeBit(cabinState.writtenFrame[1], 2, false);
+        writeBit(cabinState.writtenFrame[1], 1, false);
+        //   xSemaphoreGive(dataMutex);
+        // }
+
         transit(command);
 
         break;
 
       case DOOR_IS_OPEN:
         // xEventGroupSetBits(xRunningEventGroup, DOOR_OPEN_BIT);
+
+        // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+        // {
+        if (elevator.state == STATE_RUNNING)
+        {
+          writeFrameDFPlayer(SF_1009, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+          enableTransmit(cabinState.shouldWrite);
+        }
+        //   xSemaphoreGive(dataMutex);
+        // }
+
         Serial.println("DOOR IS OPEN!!!");
         emoActivate();
         abortMotion();
         elevator.state = STATE_PAUSED;
+
         break;
 
       case DOOR_IS_CLOSED:
+
+        // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+        // {
+        if (elevator.state == STATE_PAUSED)
+        {
+          writeFrameDFPlayer(SF_0000, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+          enableTransmit(cabinState.shouldWrite);
+        }
+        //   xSemaphoreGive(dataMutex);
+        // }
+
         Serial.println("DOOR IS CLOSED!!!");
         emoDeactivate();
         elevator.state = STATE_PENDING;
@@ -1386,6 +1417,12 @@ void vOchestrator(void *pvParams)
         emoActivate();
         abortMotion();
         elevator.state = STATE_IDLE;
+        // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+        // {
+        writeFrameDFPlayer(SF_1005, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+        enableTransmit(cabinState.shouldWrite);
+        //   xSemaphoreGive(dataMutex);
+        // }
         break;
 
         // case VTG_CLEAR:
@@ -1396,10 +1433,18 @@ void vOchestrator(void *pvParams)
         xEventGroupSetBits(xRunningEventGroup, VSG_BIT);
         M_STP();
         elevator.state = STATE_PAUSED;
+
+        // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+        // {
+        writeFrameDFPlayer(SF_1004, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+        enableTransmit(cabinState.shouldWrite);
+        //   xSemaphoreGive(dataMutex);
+        // }
         break;
 
       case VSG_CLEAR:
         elevator.state = STATE_PENDING;
+
         break;
 
       case MODBUS_TIMEOUT:
@@ -1420,7 +1465,16 @@ void vOchestrator(void *pvParams)
       case NO_POWER:
         elevator.state = STATE_EMERGENCY;
         elevator.target = MIN_FLOOR;
+        // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+        // {
+        writeFrameDFPlayer(SF_1006, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+        enableTransmit(cabinState.shouldWrite);
+        writeBit(cabinState.writtenFrame[1], 2, true);
+        writeBit(cabinState.writtenFrame[1], 1, false);
+        //   xSemaphoreGive(dataMutex);
+        // }
         xTaskNotify(xNoPowerLandingHandle, 1, eSetValueWithOverwrite);
+
         break;
 
       case COMMAND_CLEAR:
@@ -1431,12 +1485,32 @@ void vOchestrator(void *pvParams)
         elevator.pos = 1;
         elevator.btwFloor = false;
         checkUpdatePos(elevator.pos);
+
+        // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+        // {
+        writeFrameDFPlayer(SF_1003, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+        enableTransmit(cabinState.shouldWrite);
+        writeBit(cabinState.writtenFrame[1], 2, false);
+        writeBit(cabinState.writtenFrame[1], 1, false);
+        //   xSemaphoreGive(dataMutex);
+        // }
+
         break;
 
       case FLOOR2_REACHED:
         elevator.pos = 2;
         elevator.btwFloor = false;
         checkUpdatePos(elevator.pos);
+
+        // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+        // {
+        writeFrameDFPlayer(SF_1003, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+        enableTransmit(cabinState.shouldWrite);
+        writeBit(cabinState.writtenFrame[1], 2, false);
+        writeBit(cabinState.writtenFrame[1], 1, false);
+        //   xSemaphoreGive(dataMutex);
+        // }
+
         break;
 
       case POWER_RESTORED:
@@ -1542,6 +1616,17 @@ void vOchestrator(void *pvParams)
         if (cmd == userAbort)
         {
           abortMotion();
+
+          // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+          // {
+
+          writeFrameDFPlayer(SF_1013, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+          enableTransmit(cabinState.shouldWrite);
+          writeBit(cabinState.writtenFrame[1], 2, false);
+          writeBit(cabinState.writtenFrame[1], 1, false);
+
+          //   xSemaphoreGive(dataMutex);
+          // }
         }
       }
       break;
@@ -1557,7 +1642,7 @@ void vOchestrator(void *pvParams)
       break;
     }
 
-    vTaskDelay(pdMS_TO_TICKS(20));
+    vTaskDelay(pdMS_TO_TICKS(30));
   }
 }
 
@@ -1694,29 +1779,29 @@ void vPollingModbusMaster(void *pvParams)
     bool needWrite = false;
     uint16_t valToWrite = 0;
 
-    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+    // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+    // {
+    if (cabinState.shouldWrite)
     {
-      if (cabinState.shouldWrite)
-      {
-        needWrite = true;
-        valToWrite = cabinState.writtenFrame[1];
-        cabinState.shouldWrite = false;
-      }
-      xSemaphoreGive(dataMutex);
+      needWrite = true;
+      valToWrite = cabinState.writtenFrame[1];
+      cabinState.shouldWrite = false;
     }
+    //   xSemaphoreGive(dataMutex);
+    // }
 
     if (needWrite)
     {
-      node.begin(CABIN_ID, Serial1);
-      result = node.writeSingleRegister(0x0001, valToWrite);
-      // test_counter++;
-      // node.begin(VSG_ID, Serial1);
-      // result = node.writeSingleRegister(0x0001, test_counter);
+      // node.begin(CABIN_ID, Serial1);
+      // result = node.writeSingleRegister(0x0001, valToWrite);
+      // if (result != node.ku8MBSuccess)
+      // {
+      //   Serial.printf("Write Error: 0x%02X\n", result);
+      // }
 
-      if (result != node.ku8MBSuccess)
-      {
-        Serial.printf("Write Error: 0x%02X\n", result);
-      }
+      node.begin(VSG_ID, Serial1);
+      result = node.writeSingleRegister(0x0001, valToWrite);
+
       vTaskDelay(pdMS_TO_TICKS(50)); // silence between mb package
     }
 
@@ -1729,13 +1814,13 @@ void vPollingModbusMaster(void *pvParams)
       case INVERTER_STA:
         if (readDataFrom(INVERTER_ID, 28672, 10, pollingData[INVERTER_ID]))
         {
-          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
-          {
-            inverterState.running_hz = pollingData[INVERTER_ID][0] & (1 << 0);
-            inverterState.torque = pollingData[INVERTER_ID][0] & (1 << 6);
-            inverterState.digitalInput = pollingData[INVERTER_ID][0] & (1 << 7);
-            xSemaphoreGive(dataMutex);
-          }
+          // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+          // {
+          inverterState.running_hz = pollingData[INVERTER_ID][0] & (1 << 0);
+          inverterState.torque = pollingData[INVERTER_ID][0] & (1 << 6);
+          inverterState.digitalInput = pollingData[INVERTER_ID][0] & (1 << 7);
+          //   xSemaphoreGive(dataMutex);
+          // }
         }
         read_state = CABIN_STA;
         break;
@@ -1743,17 +1828,17 @@ void vPollingModbusMaster(void *pvParams)
       case CABIN_STA:
         if (readDataFrom(CABIN_ID, 0, 1, pollingData[CABIN_ID]))
         {
-          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
-          {
-            cabinState.isDoorClosed = pollingData[CABIN_ID][0] & (1 << 0);
-            cabinState.isAim2 = pollingData[CABIN_ID][0] & (1 << 1);
-            cabinState.isAim1 = pollingData[CABIN_ID][0] & (1 << 2);
-            cabinState.isUserStop = pollingData[CABIN_ID][0] & (1 << 3);
-            cabinState.isEmergStop = pollingData[CABIN_ID][0] & (1 << 4);
-            cabinState.isBusy = pollingData[CABIN_ID][0] & (1 << 5);
-            cabinState.vtgAlarm = pollingData[CABIN_ID][0] & (1 << 6);
-            xSemaphoreGive(dataMutex);
-          }
+          // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+          // {
+          cabinState.isDoorClosed = pollingData[CABIN_ID][0] & (1 << 0);
+          cabinState.isAim2 = pollingData[CABIN_ID][0] & (1 << 1);
+          cabinState.isAim1 = pollingData[CABIN_ID][0] & (1 << 2);
+          cabinState.isUserStop = pollingData[CABIN_ID][0] & (1 << 3);
+          cabinState.isEmergStop = pollingData[CABIN_ID][0] & (1 << 4);
+          cabinState.isBusy = pollingData[CABIN_ID][0] & (1 << 5);
+          cabinState.vtgAlarm = pollingData[CABIN_ID][0] & (1 << 6);
+          //   xSemaphoreGive(dataMutex);
+          // }
         }
 
         if (cabinState.isDoorClosed == true)
@@ -1782,11 +1867,11 @@ void vPollingModbusMaster(void *pvParams)
       case VSG_STA:
         if (readDataFrom(VSG_ID, 0, 1, pollingData[VSG_ID]))
         {
-          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
-          {
-            vsgState.shouldPause = pollingData[VSG_ID][0] & (1 << 0);
-            xSemaphoreGive(dataMutex);
-          }
+          // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+          // {
+          vsgState.shouldPause = pollingData[VSG_ID][0] & (1 << 0);
+          // xSemaphoreGive(dataMutex);
+          // }
         }
 
         if (vsgState.shouldPause == true)
@@ -2178,7 +2263,7 @@ void vUpdatePage(void *pvParams)
 
     m_websocketserver.broadcastTXT(jsonBuf, strlen(jsonBuf));
 
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
