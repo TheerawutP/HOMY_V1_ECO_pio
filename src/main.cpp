@@ -89,6 +89,14 @@ uint8_t torque_rated_down = 40; // both in percentage
 volatile uint32_t modbusDelayTime = 50;
 volatile uint32_t modbusRetryTime = 20;
 
+volatile uint8_t overSpeed_counter = 0;
+volatile uint32_t lastTimeCount = 0;
+
+volatile uint16_t writeFrame[5][16]; // slave id, write reg
+
+const uint32_t minSpeedPeriod = 200;
+const uint32_t overSpeed_threshold = 5;
+
 const uint8_t MIN_FLOOR = 1;
 uint8_t MAX_FLOOR = 2;
 
@@ -126,8 +134,10 @@ TaskHandle_t xModbusTimeoutHandle;
 TaskHandle_t xClearCommandHandle;
 TaskHandle_t xPollingModbusMasterHandle;
 TaskHandle_t xWriteStationHandle;
+
 TimerHandle_t xStartRunningTimer;
 TimerHandle_t xProcessDataHandle;
+
 EventGroupHandle_t xRunningEventGroup;
 
 AsyncWebServer server(80);
@@ -153,11 +163,6 @@ status_t elevator = {
     .btwFloor = false,
     .hasChanged = false};
 
-modbusStation_t read_current_sta = INVERTER_STA;
-modbusStation_t write_current_sta = INVERTER_STA;
-
-volatile uint16_t writeFrame[5][16]; // slave id, write reg
-
 cabin_t cabinState = {
     .isDoorClosed = false,
     .isAim2 = false,
@@ -175,11 +180,7 @@ vsg_t vsgState = {
     .isAlarm = {0},
     .shouldPause = false};
 
-volatile uint8_t overSpeed_counter = 0;
-volatile uint32_t lastTimeCount = 0;
 
-const uint32_t minSpeedPeriod = 200;
-const uint32_t overSpeed_threshold = 5;
 // while sleep param
 
 // other helpers
@@ -280,6 +281,7 @@ bool isSafeToRun(direction_t dir)
 }
 
 // modbus helpers
+
 bool readDataFrom(uint8_t slaveID, uint16_t startAddress, uint8_t numRead, uint16_t *hreg_row)
 {
   node.begin(slaveID, Serial1);
@@ -1184,8 +1186,6 @@ void configureserver()
 //
 //
 //
-//
-//
 
 void getDir(uint8_t target, transitCommand_t *cmd)
 {
@@ -1289,6 +1289,7 @@ void transit(transitCommand_t cmd)
 }
 
 // central state manager
+
 void checkUpdatePos(uint8_t reachedFloorNum)
 {
   if ((reachedFloorNum > 0) && (reachedFloorNum == elevator.target))
@@ -1841,18 +1842,21 @@ void vPollingModbusMaster(void *pvParams)
       {
         node.begin(CABIN_ID, Serial1);
         node.writeSingleRegister(0x0001, cabinState.writtenFrame[1]);
-        cabinState.shouldWrite = false;
-        vTaskDelay(pdMS_TO_TICKS(50)); // silence between mb package
+        // cabinState.shouldWrite = false;
+        vTaskDelay(pdMS_TO_TICKS(50)); 
       }
       break;
 
     case VSG_STA:
-      if (vsgState.shouldWrite == true)
+      // if (vsgState.shouldWrite == true)
+      if (cabinState.shouldWrite == true)
       {
         node.begin(VSG_ID, Serial1);
-        node.writeSingleRegister(0x0001, vsgState.writtenFrame[1]);
+        // node.writeSingleRegister(0x0001, vsgState.writtenFrame[1]);
+        node.writeSingleRegister(0x0001, cabinState.writtenFrame[1]);
+        cabinState.shouldWrite = false;
         vsgState.shouldWrite = false;
-        vTaskDelay(pdMS_TO_TICKS(50)); // silence between mb package
+        vTaskDelay(pdMS_TO_TICKS(50)); 
       }
       break;
 
