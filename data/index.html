@@ -39,7 +39,7 @@
 
 <body>
   <div class="main-container">
-    <nav class="navbar navbar-dark bg-transparent w-100 d-flex justify-content-center pt-4">
+    <nav class="navbar navbar-dark bg-transparent w-100 d-flex justify-content-center pt-2">
       <a href="#" class="navbar-brand m-0 text-center">
 
         <div class="logo-container">
@@ -73,20 +73,27 @@
 
 
         <button class="lift-btn" id="btnUp" onclick="on_Button_UP_pressed()">
-          <i data-lucide="arrow-up"></i>
-        </button>
-
-        <button class="lift-btn" id="btnDown" onclick="on_Button_DOWN_pressed()">
-          <i data-lucide="arrow-down"></i>
+          <i data-lucide="chevrons-up"></i>
         </button>
 
         <button class="lift-btn stop-style" id="btnStop" onclick="on_Button_STOP_pressed()">
-          <i id="stopIcon" data-lucide="pause"></i>
+          <i id="stopIcon" data-lucide="square-stop"></i>
         </button>
 
-        <button class="lift-btn bell-style" id="btnEmergency">
-          <i data-lucide="bell"></i>
+        <button class="lift-btn" id="btnDown" onclick="on_Button_DOWN_pressed()">
+          <i data-lucide="chevrons-down"></i>
         </button>
+
+        <button class="lift-btn bell-style" id="btnEmg" onclick="on_Button_EMERGENCY_pressed()">
+          <i id="bellIcon" data-lucide="triangle-alert"></i>
+        </button>
+
+        <div class="emg-msg-container">
+          <div class="emg-text" id="emgText">
+            EMERGENCY!
+            <div class="emg-sub">Press STOP button to clear</div>
+          </div>
+        </div>
 
 
         <script>lucide.createIcons();</script>

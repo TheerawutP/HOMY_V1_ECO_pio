@@ -158,6 +158,18 @@ function onMessage(evt) {
                 btnDown?.classList.remove("down-active");
             }
 
+            if ('emo' in m_json_obj) {
+                if (m_json_obj.emo === true) {
+                    // ถ้า true ให้ใส่คลาสไฟกระพริบสีแดง
+                    btnEmg?.classList.add("emerg-active");
+                    emgText?.classList.add("show");
+                } else {
+                    // ถ้า false ให้ลบคลาสทิ้งไป (ไฟดับ)
+                    btnEmg?.classList.remove("emerg-active");
+                    emgText?.classList.remove("show");
+                }
+            }
+
             // if ('Mode' in m_json_obj) {
             //     if (m_json_obj.Mode === "EMERGENCY") {
             //         btnEmg?.classList.add("blink");

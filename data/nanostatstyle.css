@@ -317,3 +317,83 @@ body {
     
     text-shadow: 0 0 15px rgba(255, 255, 255, 0.4);
 }
+
+
+
+.emerg-active {
+  /* ทำให้พื้นหลังปุ่มเป็นสีเหลืองอำพันจางๆ */
+  background: rgba(255, 191, 0, 0.3) !important; 
+  /* เปลี่ยนสีกรอบ */
+  border-color: #FFBF00 !important;
+  /* เรียกใช้แอนิเมชันกระพริบ */
+  animation: emergBlink 1s infinite ease-in-out;
+}
+
+/* เปลี่ยนสีไอคอนข้างในด้วย */
+.emerg-active svg {
+  color: #FFBF00 !important;
+  stroke: #FFBF00 !important;
+}
+
+/* แอนิเมชันกระพริบแสง */
+@keyframes emergBlink {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(255, 191, 0, 0.5);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(255, 191, 0, 1); /* แสงฟุ้งกระจายแรงสุด */
+    transform: scale(1.05); /* เด้งขยายใหญ่ขึ้นนิดนึง */
+  }
+}
+
+.emg-msg-container {
+  /* จองพื้นที่ความสูงไว้เลย ปุ่มจะได้ไม่ขยับตอนข้อความโผล่ */
+  height: 40px; 
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.emg-text {
+  font-family: 'Inter', sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+  color: #FFBF00;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1.2;
+  letter-spacing: 1px;
+  
+  /* ซ่อนไว้เป็นค่าเริ่มต้น */
+  visibility: hidden;
+  opacity: 0;
+}
+
+/* ตัวหนังสือบรรทัดเล็กลงมา */
+.emg-text .emg-sub {
+  font-size: 11px;
+  font-weight: 400;
+  color: #FFE699; /* เปลี่ยนเป็นสีเหลืองพาสเทลอ่อนๆ ให้เข้าโทน */
+  letter-spacing: 0.5px;
+}
+
+/* เมื่อได้รับคำสั่งให้แสดง */
+.emg-text.show {
+  visibility: visible;
+  animation: textAmberGlow 1s infinite;
+}
+
+/* อนิเมชันตัวหนังสือเรืองแสง */
+@keyframes textAmberGlow {
+  0%, 100% { 
+    opacity: 0.6; 
+    text-shadow: 0 0 5px rgba(255, 191, 0, 0.5); 
+  }
+  50% { 
+    opacity: 1; 
+    /* แสงฟุ้ง + แกนกลางสีขาวนิดๆ ให้ดูสว่างจ้า */
+    text-shadow: 0 0 15px rgba(255, 191, 0, 1), 0 0 5px rgba(255, 255, 255, 0.8); 
+  }
+}
