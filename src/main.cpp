@@ -2356,62 +2356,146 @@ void vReconnectTask(void *pvParams)
 //   }
 // }
 
+// void vPublishTask(void *pvParams)
+// {
+//   char jsonBuf[512]; // 🌟 เพิ่มขนาด buffer เผื่อ JSON ยาวขึ้น
+
+//   for (;;)
+//   {
+
+//     uint16_t hz, tq, di;
+//     if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+//         hz = inverterState.running_hz;
+//         tq = inverterState.torque;
+//         di = inverterState.digitalInput;
+//         xSemaphoreGive(dataMutex);
+//     } 
+//     else {
+//         hz = 0; tq = 0; di = 0;
+//     }
+
+//     snprintf(mqtt_topic, sizeof(mqtt_topic), "%s%s%s%s",
+//              KIT_topic, UT_case, system_status, elevator_status);
+
+//     snprintf(jsonBuf, sizeof(jsonBuf),
+//              "{"
+//              "\"pos\":%d,"
+//              "\"state\":\"%d\","
+//              "\"dir\":\"%d\","
+//              "\"lastDir\":\"%d\","
+//              "\"target\":%d,"
+//              "\"lastTarget\":%d,"
+//              "\"isBrake\":%s,"
+//              "\"btwFloor\":%s,"
+//              "\"inv_hz\":%d," 
+//              "\"inv_tq\":%d,"    
+//              "\"inv_di\":%d"    
+//              "}",
+//              elevator.pos,
+//              elevator.state,
+//              elevator.dir,
+//              elevator.lastDir,
+//              elevator.target,
+//              elevator.lastTarget,
+//              elevator.isBrake ? "true" : "false",
+//              elevator.btwFloor ? "true" : "false",
+//              hz, tq, di); 
+
+//     if (xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE)
+//     {
+//       if (mqttClient.connected())
+//       {
+//         mqttClient.publish(mqtt_topic, jsonBuf);
+//         // Serial.println(">> MQTT Status Published");
+//       }
+//       xSemaphoreGive(mqttMutex);
+//     }
+
+//     vTaskDelay(pdMS_TO_TICKS(1500));
+//   }
+// }
+
 void vPublishTask(void *pvParams)
 {
-  char jsonBuf[512]; // 🌟 เพิ่มขนาด buffer เผื่อ JSON ยาวขึ้น
+  char jsonBuf[512];
+  
+  status_t lastPubState;
+  memset(&lastPubState, 0, sizeof(status_t)); 
+  
+  unsigned long lastForcePubTime = 0;
+  const unsigned long FORCE_PUB_INTERVAL = 5000; 
 
   for (;;)
   {
+    status_t currState;
+    uint16_t hz = 0, tq = 0, di = 0;
 
-    uint16_t hz, tq, di;
-    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-        hz = inverterState.running_hz;
-        tq = inverterState.torque;
-        di = inverterState.digitalInput;
-        xSemaphoreGive(dataMutex);
-    } 
-    else {
-        hz = 0; tq = 0; di = 0;
-    }
-
-    snprintf(mqtt_topic, sizeof(mqtt_topic), "%s%s%s%s",
-             KIT_topic, UT_case, system_status, elevator_status);
-
-    snprintf(jsonBuf, sizeof(jsonBuf),
-             "{"
-             "\"pos\":%d,"
-             "\"state\":\"%d\","
-             "\"dir\":\"%d\","
-             "\"lastDir\":\"%d\","
-             "\"target\":%d,"
-             "\"lastTarget\":%d,"
-             "\"isBrake\":%s,"
-             "\"btwFloor\":%s,"
-             "\"inv_hz\":%d," 
-             "\"inv_tq\":%d,"    
-             "\"inv_di\":%d"    
-             "}",
-             elevator.pos,
-             elevator.state,
-             elevator.dir,
-             elevator.lastDir,
-             elevator.target,
-             elevator.lastTarget,
-             elevator.isBrake ? "true" : "false",
-             elevator.btwFloor ? "true" : "false",
-             hz, tq, di); 
-
-    if (xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE)
+    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
-      if (mqttClient.connected())
-      {
-        mqttClient.publish(mqtt_topic, jsonBuf);
-        // Serial.println(">> MQTT Status Published");
-      }
-      xSemaphoreGive(mqttMutex);
+      currState = elevator;
+      hz = inverterState.running_hz;
+      tq = inverterState.torque;
+      di = inverterState.digitalInput;
+      xSemaphoreGive(dataMutex);
+    }
+    else
+    {
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue; 
     }
 
-    vTaskDelay(pdMS_TO_TICKS(1500));
+    bool stateChanged = false;
+    if (currState.pos != lastPubState.pos ||
+        currState.state != lastPubState.state ||
+        currState.dir != lastPubState.dir ||
+        currState.target != lastPubState.target ||
+        currState.isBrake != lastPubState.isBrake ||
+        currState.btwFloor != lastPubState.btwFloor)
+    {
+        stateChanged = true; 
+    }
+
+    if (stateChanged || (millis() - lastForcePubTime > FORCE_PUB_INTERVAL))
+    {
+      snprintf(mqtt_topic, sizeof(mqtt_topic), "%s%s%s%s",
+               KIT_topic, UT_case, system_status, elevator_status);
+
+      snprintf(jsonBuf, sizeof(jsonBuf),
+               "{"
+               "\"floorValue\":%d,"
+               "\"state\":%d,"
+               "\"dir\":%d,"
+               "\"targetFloor\":%d,"
+               "\"isBrake\":%s,"
+               "\"btwFloor\":%s,"
+               "\"emo\":%s,"
+               "\"inv_hz\":%d,"
+               "\"inv_tq\":%d,"
+               "\"inv_di\":%d"
+               "}",
+               currState.pos,
+               currState.state,
+               currState.dir,
+               currState.target,
+               currState.isBrake ? "true" : "false",
+               currState.btwFloor ? "true" : "false",
+               (digitalRead(EMO) == HIGH) ? "true" : "false", 
+               hz, tq, di); 
+
+      if (xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE)
+      {
+        if (mqttClient.connected())
+        {
+          mqttClient.publish(mqtt_topic, jsonBuf);
+        }
+        xSemaphoreGive(mqttMutex);
+      }
+
+      lastPubState = currState;
+      lastForcePubTime = millis();
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(100)); 
   }
 }
 
