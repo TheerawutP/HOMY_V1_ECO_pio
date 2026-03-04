@@ -37,7 +37,7 @@ typedef struct
 enum elevatorEvent_t
 {
   SAFETY_BRAKE,
-  OVERSPEDD,
+  OVERSPEED,
   DOOR_IS_OPEN,
   DOOR_IS_CLOSED,
   OVERTORQUE,

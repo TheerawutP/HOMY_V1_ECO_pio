@@ -134,6 +134,7 @@ TaskHandle_t xModbusTimeoutHandle;
 TaskHandle_t xClearCommandHandle;
 TaskHandle_t xPollingModbusMasterHandle;
 TaskHandle_t xWriteStationHandle;
+TaskHandle_t xPollingSpeedGovernor;
 
 TimerHandle_t xStartRunningTimer;
 TimerHandle_t xProcessDataHandle;
@@ -1369,7 +1370,7 @@ void vOchestrator(void *pvParams)
         Serial.println("sling!!!");
         elevator.state = STATE_EMERGENCY;
         abortMotion();
-        
+
         if (elevator.pos > 1 && elevator.btwFloor == true)
         {
           if (elevator.dir == DIR_UP)
@@ -1574,6 +1575,14 @@ void vOchestrator(void *pvParams)
         break;
 
       case OVERTORQUE:
+        break;
+
+      case OVERSPEED:
+        Serial.println("OverSpeed!!!!");
+        emoActivate();
+        M_STP();
+        BRK_ON();
+        sendWebsocketAlert("WARNING", "Over Speed is detected. Elevator halted.");
         break;
 
       default:
@@ -2225,42 +2234,81 @@ void vPollingSafetySling(void *pvParams)
 //   // portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 // }
 
-void ARDUINO_ISR_ATTR ISR_OverSpeed()
+// void ARDUINO_ISR_ATTR ISR_OverSpeed()
+// {
+//   TickType_t now = xTaskGetTickCountFromISR();
+
+//   TickType_t diff = now - lastTimeCount;
+
+//   lastTimeCount = now;
+
+//   if (diff < pdMS_TO_TICKS(500)) // neglect on-off within 300 ms
+//   {
+//     return;
+//   }
+
+//   if (diff < pdMS_TO_TICKS(minSpeedPeriod))
+//   {
+//     overSpeed_counter++;
+//   }
+//   else
+//   {
+//     overSpeed_counter = 1;
+//   }
+
+//   if (overSpeed_counter >= overSpeed_threshold)
+//   {
+//     overSpeed_counter = 0;
+
+//     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+//     xTaskNotifyFromISR(xOchestratorHandle, OVERSPEED, eSetValueWithOverwrite, &xHigherPriorityTaskWoken);
+//     if (xHigherPriorityTaskWoken)
+//     {
+//       portYIELD_FROM_ISR();
+//     }
+//   }
+// }
+
+void vPollingSpeedGovernor(void *pvParams)
 {
-  TickType_t now = xTaskGetTickCountFromISR();
+  bool lastPinState = HIGH;
+  unsigned long lastEdgeTime = 0;
+  // uint8_t overSpeed_counter = 0;
 
-  TickType_t diff = now - lastTimeCount;
-
-  if (diff < pdMS_TO_TICKS(80))
+  for (;;)
   {
-    return;
-  }
+    bool currentPinState = digitalRead(speedGovernor);
 
-  if (diff < pdMS_TO_TICKS(minSpeedPeriod))
-  {
-    overSpeed_counter++;
-  }
-  else
-  {
-    overSpeed_counter = 1;
-  }
+    if (lastPinState == HIGH && currentPinState == LOW)
+    {
+      unsigned long now = millis();
+      unsigned long diff = now - lastEdgeTime;
+      lastEdgeTime = now;
 
-  lastTimeCount = now;
+      if (diff > 50)
+      {
+        if (diff < minSpeedPeriod) 
+        {
+          overSpeed_counter++;
+        }
+        else 
+        {
+          overSpeed_counter = 1; 
+        }
 
-  if (overSpeed_counter >= overSpeed_threshold)
-  {
-    overSpeed_counter = 0;
+        if (overSpeed_counter >= overSpeed_threshold)
+        {
+          overSpeed_counter = 0; 
+          Serial.println(">> OVERSPEED DETECTED (via Polling) !!!");
 
-    // BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    // xTaskNotifyFromISR(xOchestratorHandle, OVERSPEED, eSetValueWithOverwrite, &xHigherPriorityTaskWoken);
-    // if (xHigherPriorityTaskWoken) {
-    //     portYIELD_FROM_ISR();
-    // }
+          xTaskNotify(xOchestratorHandle, OVERSPEED, eSetValueWithOverwrite);
+        }
+      }
+    }
 
-    Serial.println("OverSpeed!!!!");
-    emoActivate();
-    M_STP();
-    BRK_ON();
+    lastPinState = currentPinState; // จำสถานะไว้เทียบรอบหน้า
+
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
@@ -2585,7 +2633,7 @@ void setup()
   pinMode(safetySling, INPUT_PULLUP);
 
   pinMode(speedGovernor, INPUT_PULLUP);
-  attachInterrupt(speedGovernor, ISR_OverSpeed, FALLING);
+  // attachInterrupt(speedGovernor, ISR_OverSpeed, FALLING);
 
   // attachInterrupt(safetySling, ISR_Safety, FALLING);
   // pinMode(CS, OUTPUT);
@@ -2642,6 +2690,7 @@ void setup()
   xTaskCreate(vPollingFloorSensor2, "PollingFloorSensor2", 2048, NULL, 4, &xPollingFloorSensor2Handle);
   xTaskCreate(vPollingNoPower, "PollingNoPower", 2048, NULL, 4, &xPollingNoPowerHandle);
   xTaskCreate(vPollingSafetySling, "PollingSafetySling", 2048, NULL, 4, &xPollingSafetySlingHandle);
+  xTaskCreate(vPollingSpeedGovernor, "PollingSpeedGovernor", 2048, NULL, 4, &xPollingSpeedGovernor);
 
   xTaskCreate(vReconnectTask, "ReconnectTask", 4096, NULL, 2, NULL);
   xTaskCreate(vPublishTask, "PublishTask", 4096, NULL, 2, NULL);
