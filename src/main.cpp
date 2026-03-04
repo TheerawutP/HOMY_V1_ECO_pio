@@ -95,7 +95,7 @@ volatile uint32_t lastTimeCount = 0;
 volatile uint16_t writeFrame[5][16]; // slave id, write reg
 
 const uint32_t minSpeedPeriod = 1000;
-const uint32_t overSpeed_threshold = 5;
+const uint32_t overSpeed_threshold = 10;
 
 const uint8_t MIN_FLOOR = 1;
 uint8_t MAX_FLOOR = 2;
@@ -891,6 +891,15 @@ void handle_websocket_text(uint8_t *payload)
   }
 }
 
+void sendWebsocketAlert(const char *alertType, const char *message)
+{
+  char alertBuf[128];
+  snprintf(alertBuf, sizeof(alertBuf), "{\"alert\":\"%s\", \"msg\":\"%s\"}", alertType, message);
+
+  m_websocketserver.broadcastTXT(alertBuf, strlen(alertBuf));
+  Serial.printf(">> Sent Alert to UI: %s\n", message);
+}
+
 void onWebSocketEvent(uint8_t num,
                       WStype_t type,
                       uint8_t *payload,
@@ -1360,6 +1369,7 @@ void vOchestrator(void *pvParams)
         Serial.println("sling!!!");
         elevator.state = STATE_EMERGENCY;
         abortMotion();
+        
         if (elevator.pos > 1 && elevator.btwFloor == true)
         {
           if (elevator.dir == DIR_UP)
@@ -1396,6 +1406,7 @@ void vOchestrator(void *pvParams)
         }
 
         transit(command);
+        sendWebsocketAlert("WARNING", "Safety Sling is detected. Elevator halted.");
 
         break;
 
@@ -1415,6 +1426,7 @@ void vOchestrator(void *pvParams)
         Serial.println("DOOR IS OPEN!!!");
         emoActivate();
         abortMotion();
+        sendWebsocketAlert("WARNING", "Door is open. Elevator paused.");
         // elevator.state = STATE_PAUSED;
 
         break;
@@ -1470,6 +1482,7 @@ void vOchestrator(void *pvParams)
         {
           M_STP();
           elevator.state = STATE_PAUSED;
+          sendWebsocketAlert("WARNING", "VSG is detected. Elevator paused.");
         }
         break;
 
@@ -2218,7 +2231,7 @@ void ARDUINO_ISR_ATTR ISR_OverSpeed()
 
   TickType_t diff = now - lastTimeCount;
 
-  if (diff < pdMS_TO_TICKS(50))
+  if (diff < pdMS_TO_TICKS(80))
   {
     return;
   }

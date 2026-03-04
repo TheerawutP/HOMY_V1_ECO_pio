@@ -129,7 +129,12 @@ function onMessage(evt) {
             var btnUp = document.getElementById("btnUp");
             var btnDown = document.getElementById("btnDown");
             // var btnEmg = document.getElementById("btnEmergency");
+            
 
+            if ('alert' in m_json_obj) {
+                showToast(m_json_obj.alert, m_json_obj.msg);
+                return; 
+            }
 
 
             if ('floorValue' in m_json_obj) {
@@ -227,5 +232,26 @@ function sendDataRate() {
 window.addEventListener("load", init, false);
 
 
+function showToast(type, message) {
+    var container = document.getElementById("toast-container");
+    if (!container) return;
 
+    // สร้างกล่อง div ใหม่
+    var toast = document.createElement("div");
+    
+    // ใส่คลาสตามประเภทที่ส่งมา (danger, warning, info) แปลงตัวพิมพ์เล็ก
+    toast.className = "toast-msg " + type.toLowerCase();
+    
+    // ใส่ข้อความ
+    toast.innerHTML = "<strong>" + type + "</strong>" + message;
 
+    // เอาไปแปะในหน้าจอ
+    container.appendChild(toast);
+
+    // ตั้งเวลาให้ลบตัวเองทิ้งหลังจากผ่านไป 5 วินาที
+    setTimeout(function() {
+        if(container.contains(toast)){
+            container.removeChild(toast);
+        }
+    }, 5000); 
+}

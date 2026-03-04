@@ -397,3 +397,58 @@ body {
     text-shadow: 0 0 15px rgba(255, 191, 0, 1), 0 0 5px rgba(255, 255, 255, 0.8); 
   }
 }
+
+
+
+
+
+#toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* หน้าตาของ Pop-up */
+.toast-msg {
+    background: rgba(30, 30, 45, 0.95);
+    backdrop-filter: blur(10px);
+    color: #fff;
+    padding: 15px 25px;
+    border-radius: 8px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    font-family: 'Inter', sans-serif;
+    min-width: 250px;
+    transform: translateX(120%); /* ซ่อนไว้ทางขวาก่อน */
+    animation: slideInRight 0.3s forwards, fadeOutRight 0.5s 4.5s forwards;
+    border-left: 5px solid #00c0ff; /* สีขอบเริ่มต้น */
+}
+
+/* หัวข้อ (DANGER, WARNING, INFO) */
+.toast-msg strong {
+    display: block;
+    font-size: 12px;
+    letter-spacing: 1px;
+    margin-bottom: 5px;
+}
+
+/* แบ่งสีตามประเภท */
+.toast-msg.danger { border-left-color: #ff3333; color: #ffcccc; }
+.toast-msg.danger strong { color: #ff3333; }
+
+.toast-msg.warning { border-left-color: #FFBF00; color: #fff0cc; }
+.toast-msg.warning strong { color: #FFBF00; }
+
+.toast-msg.info { border-left-color: #00e676; color: #ccffcc; }
+.toast-msg.info strong { color: #00e676; }
+
+/* แอนิเมชันเข้าและออก */
+@keyframes slideInRight {
+    to { transform: translateX(0); }
+}
+@keyframes fadeOutRight {
+    to { opacity: 0; transform: translateX(120%); }
+}
