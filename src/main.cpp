@@ -28,7 +28,7 @@
 #define BRK 5          // brake
 #define NoPower 25
 #define safetySling 26
-#define speedGovernor 27
+#define speedGovernor 14
 #define EMO 21 // emergency stop
 
 // #define CS 21 //direct to 3.3v
@@ -94,7 +94,7 @@ volatile uint32_t lastTimeCount = 0;
 
 volatile uint16_t writeFrame[5][16]; // slave id, write reg
 
-const uint32_t minSpeedPeriod = 200;
+const uint32_t minSpeedPeriod = 1000;
 const uint32_t overSpeed_threshold = 5;
 
 const uint8_t MIN_FLOOR = 1;
@@ -2186,30 +2186,69 @@ void vPollingSafetySling(void *pvParams)
   }
 }
 
+// void ARDUINO_ISR_ATTR ISR_OverSpeed()
+// {
+//   unsigned long now = millis();
+//   if (now - lastTimeCount < minSpeedPeriod)
+//   {
+//     overSpeed_counter++;
+//   }
+//   else
+//   {
+//     overSpeed_counter = 0;
+//   }
+
+//   lastTimeCount = now;
+
+//   if (overSpeed_counter > overSpeed_threshold)
+//   {
+//     Serial.println("OverSpeed!!!!");
+//     emoActivate();
+//     M_STP();
+//     BRK_ON();
+
+//     overSpeed_counter = 0;
+//   }
+//   // portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+// }
+
 void ARDUINO_ISR_ATTR ISR_OverSpeed()
 {
-  unsigned long now = millis();
-  if (now - lastTimeCount < minSpeedPeriod)
+  TickType_t now = xTaskGetTickCountFromISR();
+
+  TickType_t diff = now - lastTimeCount;
+
+  if (diff < pdMS_TO_TICKS(50))
+  {
+    return;
+  }
+
+  if (diff < pdMS_TO_TICKS(minSpeedPeriod))
   {
     overSpeed_counter++;
   }
   else
   {
-    overSpeed_counter = 0;
+    overSpeed_counter = 1;
   }
 
   lastTimeCount = now;
 
-  if (overSpeed_counter > overSpeed_threshold)
+  if (overSpeed_counter >= overSpeed_threshold)
   {
+    overSpeed_counter = 0;
+
+    // BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    // xTaskNotifyFromISR(xOchestratorHandle, OVERSPEED, eSetValueWithOverwrite, &xHigherPriorityTaskWoken);
+    // if (xHigherPriorityTaskWoken) {
+    //     portYIELD_FROM_ISR();
+    // }
+
     Serial.println("OverSpeed!!!!");
     emoActivate();
     M_STP();
     BRK_ON();
-
-    overSpeed_counter = 0;
   }
-  // portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 // safety task handlers
@@ -2308,122 +2347,15 @@ void vReconnectTask(void *pvParams)
   }
 }
 
-// void vPublishTask(void *pvParams)
-// {
-//   char jsonBuf[256];
-
-//   for (;;)
-//   {
-//     // if (elevator.hasChanged == true)
-//     // {
-//       snprintf(mqtt_topic, sizeof(mqtt_topic), "%s%s%s%s",
-//                KIT_topic, UT_case, system_status, elevator_status);
-
-//       snprintf(jsonBuf, sizeof(jsonBuf),
-//                "{"
-//                "\"pos\":%d,"
-//                "\"state\":\"%d\","
-//                "\"dir\":\"%d\","
-//                "\"lastDir\":\"%d\","
-//                "\"target\":%d,"
-//                "\"lastTarget\":%d,"
-//                "\"isBrake\":%s,"
-//                "\"btwFloor\":%s"
-//                "}",
-//                elevator.pos,
-//                elevator.state,
-//                elevator.dir,
-//                elevator.lastDir,
-//                elevator.target,
-//                elevator.lastTarget,
-//                elevator.isBrake ? "true" : "false",
-//                elevator.btwFloor ? "true" : "false");
-
-//       if (xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE)
-//       {
-//         if (mqttClient.connected())
-//         {
-//           mqttClient.publish(mqtt_topic, jsonBuf);
-//           Serial.println(">> MQTT Status Published");
-//         }
-//         xSemaphoreGive(mqttMutex);
-//       }
-
-//     //   elevator.hasChanged = false;
-//     // }
-
-//     vTaskDelay(pdMS_TO_TICKS(1500));
-//   }
-// }
-
-// void vPublishTask(void *pvParams)
-// {
-//   char jsonBuf[512]; // 🌟 เพิ่มขนาด buffer เผื่อ JSON ยาวขึ้น
-
-//   for (;;)
-//   {
-
-//     uint16_t hz, tq, di;
-//     if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-//         hz = inverterState.running_hz;
-//         tq = inverterState.torque;
-//         di = inverterState.digitalInput;
-//         xSemaphoreGive(dataMutex);
-//     } 
-//     else {
-//         hz = 0; tq = 0; di = 0;
-//     }
-
-//     snprintf(mqtt_topic, sizeof(mqtt_topic), "%s%s%s%s",
-//              KIT_topic, UT_case, system_status, elevator_status);
-
-//     snprintf(jsonBuf, sizeof(jsonBuf),
-//              "{"
-//              "\"pos\":%d,"
-//              "\"state\":\"%d\","
-//              "\"dir\":\"%d\","
-//              "\"lastDir\":\"%d\","
-//              "\"target\":%d,"
-//              "\"lastTarget\":%d,"
-//              "\"isBrake\":%s,"
-//              "\"btwFloor\":%s,"
-//              "\"inv_hz\":%d," 
-//              "\"inv_tq\":%d,"    
-//              "\"inv_di\":%d"    
-//              "}",
-//              elevator.pos,
-//              elevator.state,
-//              elevator.dir,
-//              elevator.lastDir,
-//              elevator.target,
-//              elevator.lastTarget,
-//              elevator.isBrake ? "true" : "false",
-//              elevator.btwFloor ? "true" : "false",
-//              hz, tq, di); 
-
-//     if (xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE)
-//     {
-//       if (mqttClient.connected())
-//       {
-//         mqttClient.publish(mqtt_topic, jsonBuf);
-//         // Serial.println(">> MQTT Status Published");
-//       }
-//       xSemaphoreGive(mqttMutex);
-//     }
-
-//     vTaskDelay(pdMS_TO_TICKS(1500));
-//   }
-// }
-
 void vPublishTask(void *pvParams)
 {
   char jsonBuf[512];
-  
+
   status_t lastPubState;
-  memset(&lastPubState, 0, sizeof(status_t)); 
-  
+  memset(&lastPubState, 0, sizeof(status_t));
+
   unsigned long lastForcePubTime = 0;
-  const unsigned long FORCE_PUB_INTERVAL = 5000; 
+  const unsigned long FORCE_PUB_INTERVAL = 5000;
 
   for (;;)
   {
@@ -2441,7 +2373,7 @@ void vPublishTask(void *pvParams)
     else
     {
       vTaskDelay(pdMS_TO_TICKS(50));
-      continue; 
+      continue;
     }
 
     bool stateChanged = false;
@@ -2452,7 +2384,7 @@ void vPublishTask(void *pvParams)
         currState.isBrake != lastPubState.isBrake ||
         currState.btwFloor != lastPubState.btwFloor)
     {
-        stateChanged = true; 
+      stateChanged = true;
     }
 
     if (stateChanged || (millis() - lastForcePubTime > FORCE_PUB_INTERVAL))
@@ -2479,8 +2411,8 @@ void vPublishTask(void *pvParams)
                currState.target,
                currState.isBrake ? "true" : "false",
                currState.btwFloor ? "true" : "false",
-               (digitalRead(EMO) == HIGH) ? "true" : "false", 
-               hz, tq, di); 
+               (digitalRead(EMO) == HIGH) ? "true" : "false",
+               hz, tq, di);
 
       if (xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE)
       {
@@ -2495,7 +2427,7 @@ void vPublishTask(void *pvParams)
       lastForcePubTime = millis();
     }
 
-    vTaskDelay(pdMS_TO_TICKS(100)); 
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
@@ -2759,7 +2691,7 @@ void loop()
     // //   Serial.printf("  Power Monitor: %d (0=NoPower)\n", digitalRead(NoPower));
     // //   Serial.printf("  Relays: UP=%d, DW=%d, BRK=%d, EMO=%d\n", digitalRead(R_UP), digitalRead(R_DW), digitalRead(BRK), digitalRead(EMO));
 
-      // --- BLOCK 4: Modbus Data (Slave Status) ---
+    // --- BLOCK 4: Modbus Data (Slave Status) ---
     Serial.println(">> [MODBUS DATA]");
     Serial.printf("  [INV] Hz: %d | Torque: %d | DI: %d\n", dbg_inverter.running_hz, dbg_inverter.torque, dbg_inverter.digitalInput);
     Serial.printf("  [CABIN] DoorClosed: %d | Emerg: %d | Busy: %d\n", dbg_cabin.isDoorClosed, dbg_cabin.isEmergStop, dbg_cabin.isBusy);
@@ -2772,6 +2704,9 @@ void loop()
     Serial.printf("  - Modbus Dis: %d\n", (dbg_events & MODBUS_DIS_BIT) ? 1 : 0);
     Serial.printf("  - Emergency: %d\n", (dbg_events & EMERG_BIT) ? 1 : 0);
 
+    Serial.println(digitalRead(27));
+    Serial.println(digitalRead(14));
+    Serial.println(overSpeed_counter);
     Serial.println("---------------------------");
   }
 }
