@@ -92,13 +92,15 @@ volatile uint32_t modbusRetryTime = 20;
 volatile uint8_t overSpeed_counter = 0;
 volatile uint32_t lastTimeCount = 0;
 
-volatile uint16_t writeFrame[5][16]; // slave id, write reg
-
-const uint32_t minSpeedPeriod = 1000;
-const uint32_t overSpeed_threshold = 10;
+// const uint32_t minSpeedPeriod = 1000;
+const uint32_t upper_bound_speed_interval = 800;
+const uint32_t lower_bound_speed_interval = 1000;
+const uint32_t overSpeed_threshold = 2;
 
 const uint8_t MIN_FLOOR = 1;
 uint8_t MAX_FLOOR = 2;
+
+volatile uint16_t writeFrame[5][16]; // slave id, write reg
 
 const char *mqtt_broker = "kit.flinkone.com";
 const int mqtt_port = 1883; // unencrypt
@@ -225,14 +227,16 @@ inline void M_STP()
 
 inline void emoActivate()
 {
-  // xEventGroupSetBits(xRunningEventGroup, EMERG_BIT);
+  xEventGroupSetBits(xRunningEventGroup, EMERG_BIT);
   // xTaskNotify(xOchestratorHandle, EMERG_PRESSED, eSetValueWithOverwrite);
+  M_STP();
+  BRK_ON();
   digitalWrite(EMO, HIGH);
 }
 
 inline void emoDeactivate()
 {
-  // xEventGroupClearBits(xRunningEventGroup, EMERG_BIT);
+  xEventGroupClearBits(xRunningEventGroup, EMERG_BIT);
   // xTaskNotify(xOchestratorHandle, EMERG_RELEASED, eSetValueWithOverwrite);
   digitalWrite(EMO, LOW);
 }
@@ -2269,11 +2273,52 @@ void vPollingSafetySling(void *pvParams)
 //   }
 // }
 
+// void vPollingSpeedGovernor(void *pvParams)
+// {
+//   bool lastPinState = HIGH;
+//   unsigned long lastEdgeTime = 0;
+//   // uint8_t overSpeed_counter = 0;
+
+//   for (;;)
+//   {
+//     bool currentPinState = digitalRead(speedGovernor);
+
+//     if (lastPinState == HIGH && currentPinState == LOW)
+//     {
+//       unsigned long now = millis();
+//       unsigned long diff = now - lastEdgeTime;
+//       lastEdgeTime = now;
+
+//       if (diff > 50)
+//       {
+//         if ((diff <= upper_bound_speed_interval) && (diff >= lower_bound_speed_interval))
+//         {
+//           overSpeed_counter = 1;
+//         }
+//         else if( diff < upper_bound_speed_interval){
+//           overSpeed_counter++;
+//         }
+
+//         if (overSpeed_counter >= overSpeed_threshold)
+//         {
+//           overSpeed_counter = 0;
+//           Serial.println(">> OVERSPEED DETECTED (via Polling) !!!");
+
+//           xTaskNotify(xOchestratorHandle, OVERSPEED, eSetValueWithOverwrite);
+//         }
+//       }
+//     }
+
+//     lastPinState = currentPinState; // จำสถานะไว้เทียบรอบหน้า
+
+//     vTaskDelay(pdMS_TO_TICKS(10));
+//   }
+// }
+
 void vPollingSpeedGovernor(void *pvParams)
 {
-  bool lastPinState = HIGH;
-  unsigned long lastEdgeTime = 0;
-  // uint8_t overSpeed_counter = 0;
+  bool lastPinState = digitalRead(speedGovernor);
+  unsigned long lastEdgeTime = millis();
 
   for (;;)
   {
@@ -2287,31 +2332,34 @@ void vPollingSpeedGovernor(void *pvParams)
 
       if (diff > 50)
       {
-        if (diff < minSpeedPeriod) 
+        Serial.print("diff is: ");
+        Serial.println(diff);
+        if (diff < upper_bound_speed_interval)
         {
           overSpeed_counter++;
         }
-        else 
+        else if (diff <= lower_bound_speed_interval)
         {
-          overSpeed_counter = 1; 
+          overSpeed_counter = 0;
+        }
+        else
+        {
+          overSpeed_counter = 0;
         }
 
         if (overSpeed_counter >= overSpeed_threshold)
         {
-          overSpeed_counter = 0; 
+          overSpeed_counter = 0;
           Serial.println(">> OVERSPEED DETECTED (via Polling) !!!");
-
           xTaskNotify(xOchestratorHandle, OVERSPEED, eSetValueWithOverwrite);
         }
       }
     }
 
-    lastPinState = currentPinState; // จำสถานะไว้เทียบรอบหน้า
-
+    lastPinState = currentPinState;
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
-
 // safety task handlers
 
 void vNoPowerLanding(void *pvParams)
@@ -2643,15 +2691,6 @@ void setup()
   // attachInterrupt(RST_SYS, ISR_ResetSystem, FALLING);
 
   // digitalWrite(R_POWER_CUT, HIGH);
-  M_STP();
-  BRK_ON();
-  emoDeactivate();
-
-  // xSemTransit = xSemaphoreCreateBinary();
-  // xSemDoneTransit = xSemaphoreCreateBinary();
-  // xSemLanding = xSemaphoreCreateBinary();
-
-  // xTransitMutex = xSemaphoreCreateMutex();
 
   xRunningEventGroup = xEventGroupCreate();
 
@@ -2663,6 +2702,16 @@ void setup()
   {
     Serial.println("Error: Cannot create Event Group!");
   }
+
+  M_STP();
+  BRK_ON();
+  emoDeactivate();
+
+  // xSemTransit = xSemaphoreCreateBinary();
+  // xSemDoneTransit = xSemaphoreCreateBinary();
+  // xSemLanding = xSemaphoreCreateBinary();
+
+  // xTransitMutex = xSemaphoreCreateMutex();
 
   mqttMutex = xSemaphoreCreateMutex();
   modbusMutex = xSemaphoreCreateMutex();
