@@ -225,20 +225,36 @@ inline void M_STP()
   // Serial.println("Motor Stop");
 }
 
-inline void emoActivate()
+void emoActivate()
 {
   xEventGroupSetBits(xRunningEventGroup, EMERG_BIT);
   // xTaskNotify(xOchestratorHandle, EMERG_PRESSED, eSetValueWithOverwrite);
   M_STP();
   BRK_ON();
   digitalWrite(EMO, HIGH);
+
+  if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+  {
+    writeFrameDFPlayer(SF_1016, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+    enableTransmit(cabinState.shouldWrite);
+    writeBit(cabinState.writtenFrame[1], 4, true);
+    writeBit(cabinState.writtenFrame[1], 2, false);
+    writeBit(cabinState.writtenFrame[1], 1, false);
+    xSemaphoreGive(dataMutex);
+  }
 }
 
-inline void emoDeactivate()
+void emoDeactivate()
 {
   xEventGroupClearBits(xRunningEventGroup, EMERG_BIT);
   // xTaskNotify(xOchestratorHandle, EMERG_RELEASED, eSetValueWithOverwrite);
   digitalWrite(EMO, LOW);
+    if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+  {
+    enableTransmit(cabinState.shouldWrite);
+    writeBit(cabinState.writtenFrame[1], 4, false);
+    xSemaphoreGive(dataMutex);
+  }
 }
 
 void abortMotion()
