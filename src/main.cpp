@@ -275,7 +275,7 @@ void emoActivate()
 
   if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
   {
-    writeFrameDFPlayer(SF_1016, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+    // writeFrameDFPlayer(SF_1016, cabinState.writtenFrame[1], cabinState.isBusy, 6);
     enableTransmit(cabinState.shouldWrite);
     writeBit(cabinState.writtenFrame[1], 4, true);
     writeBit(cabinState.writtenFrame[1], 2, false);
@@ -1456,11 +1456,11 @@ void vOchestrator(void *pvParams)
 
         if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
         {
-          if (elevator.state == STATE_PAUSED)
-          {
-            writeFrameDFPlayer(SF_0000, cabinState.writtenFrame[1], cabinState.isBusy, 6);
-            enableTransmit(cabinState.shouldWrite);
-          }
+          // if (elevator.state == STATE_PAUSED)
+          // {
+          //   writeFrameDFPlayer(SF_0000, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+          //   enableTransmit(cabinState.shouldWrite);
+          // }
           xSemaphoreGive(dataMutex);
         }
 
@@ -1491,11 +1491,11 @@ void vOchestrator(void *pvParams)
         xEventGroupSetBits(xRunningEventGroup, VSG_BIT);
         if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
         {
-          // if (elevator.state != STATE_PAUSED)
-          // {
-          writeFrameDFPlayer(SF_1004, cabinState.writtenFrame[1], cabinState.isBusy, 6);
-          enableTransmit(cabinState.shouldWrite);
-          // }
+          if (elevator.dir == DIR_DOWN && elevator.state == STATE_RUNNING)
+          {
+            writeFrameDFPlayer(SF_1004, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+            enableTransmit(cabinState.shouldWrite);
+          }
           xSemaphoreGive(dataMutex);
         }
         if (elevator.dir == DIR_DOWN)
@@ -1602,6 +1602,13 @@ void vOchestrator(void *pvParams)
         M_STP();
         BRK_ON();
         sendWebsocketAlert("WARNING", "Over Speed is detected. Elevator halted.");
+
+        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+        {
+          writeFrameDFPlayer(SF_1008, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+          enableTransmit(cabinState.shouldWrite);
+          xSemaphoreGive(dataMutex);
+        }
         break;
 
       default:
@@ -1869,6 +1876,8 @@ void vPollingModbusMaster(void *pvParams)
   static bool lastVtgState = false;
   static bool lastVsgState = false;
 
+  static bool lastEmergStop = false;
+
   for (;;)
   {
     // bool needWrite = false;
@@ -2036,9 +2045,18 @@ void vPollingModbusMaster(void *pvParams)
           lastDoorState = cabinState.isDoorClosed;
         }
 
-        if (cabinState.isEmergStop)
+        // if (cabinState.isEmergStop)
+        // {
+        //   emoActivate();
+        // }
+
+        if (cabinState.isEmergStop != lastEmergStop)
         {
-          emoActivate();
+          if (cabinState.isEmergStop == true)
+          {
+            emoActivate();
+          }
+          lastEmergStop = cabinState.isEmergStop;
         }
 
         if (cabinState.vtgAlarm != lastVtgState)
