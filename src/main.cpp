@@ -244,7 +244,7 @@ void writeBit(uint16_t &value, uint8_t bit, bool state)
 
 void writeFrameDFPlayer(uint8_t track, uint16_t &dataframe, bool isBusy, uint8_t startDFBits)
 {
-  uint8_t track4Bit = track & 0x0F;
+  uint8_t track4Bit = track & 0x1F;
 
   if (isBusy == true)
   {
@@ -258,7 +258,7 @@ void writeFrameDFPlayer(uint8_t track, uint16_t &dataframe, bool isBusy, uint8_t
     dataframe |= (1 << startDFBits);
 
     // clear df 4-bit before overwrite
-    dataframe &= ~(0x0F << (startDFBits + 2));
+    dataframe &= ~(0x1F << (startDFBits + 2));
 
     // write num of track
     dataframe |= (track4Bit << (startDFBits + 2));
@@ -273,15 +273,15 @@ void emoActivate()
   BRK_ON();
   digitalWrite(EMO, HIGH);
 
-  if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
-  {
-    // writeFrameDFPlayer(SF_1016, cabinState.writtenFrame[1], cabinState.isBusy, 6);
-    enableTransmit(cabinState.shouldWrite);
-    writeBit(cabinState.writtenFrame[1], 4, true);
-    writeBit(cabinState.writtenFrame[1], 2, false);
-    writeBit(cabinState.writtenFrame[1], 1, false);
-    xSemaphoreGive(dataMutex);
-  }
+  // if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+  // {
+  //   // writeFrameDFPlayer(SF_1016, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+  //   enableTransmit(cabinState.shouldWrite);
+  //   writeBit(cabinState.writtenFrame[1], 4, true);
+  //   writeBit(cabinState.writtenFrame[1], 2, false);
+  //   writeBit(cabinState.writtenFrame[1], 1, false);
+  //   xSemaphoreGive(dataMutex);
+  // }
 }
 
 void emoDeactivate()
@@ -1521,7 +1521,16 @@ void vOchestrator(void *pvParams)
 
       case EMERG_PRESSED:
         // xEventGroupSetBits(xRunningEventGroup, EMERG_BIT);
+        emoActivate();
 
+        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+        {
+          writeFrameDFPlayer(SF_1016, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+          enableTransmit(cabinState.shouldWrite);
+          writeBit(cabinState.writtenFrame[1], 2, false);
+          writeBit(cabinState.writtenFrame[1], 1, false);
+          xSemaphoreGive(dataMutex);
+        }
         break;
 
         // case EMERG_RELEASED:
@@ -2054,7 +2063,7 @@ void vPollingModbusMaster(void *pvParams)
         {
           if (cabinState.isEmergStop == true)
           {
-            emoActivate();
+            xTaskNotify(xOchestratorHandle, EMERG_PRESSED, eSetValueWithOverwrite);
           }
           lastEmergStop = cabinState.isEmergStop;
         }
