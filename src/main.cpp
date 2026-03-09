@@ -2591,14 +2591,14 @@ void vStatusLogger(void *pvParams)
   {
 
     if (elevator.pos != lastPOS || elevator.btwFloor != lastBtw)
-      if (elevator.pos != lastPOS)
-      {
-
+      // if (elevator.pos != lastPOS)
+      // {
+        
         saveStatus();
 
         lastPOS = elevator.pos;
         lastBtw = elevator.btwFloor;
-      }
+      // }
     vTaskDelay(3000);
   }
 }
