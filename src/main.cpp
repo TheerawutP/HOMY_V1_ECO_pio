@@ -225,6 +225,46 @@ inline void M_STP()
   // Serial.println("Motor Stop");
 }
 
+void enableTransmit(bool &shouldWrite)
+{
+  shouldWrite = true;
+}
+
+void writeBit(uint16_t &value, uint8_t bit, bool state)
+{
+  if (state)
+  {
+    value |= (1 << bit); // set
+  }
+  else
+  {
+    value &= ~(1 << bit); // clear
+  }
+}
+
+void writeFrameDFPlayer(uint8_t track, uint16_t &dataframe, bool isBusy, uint8_t startDFBits)
+{
+  uint8_t track4Bit = track & 0x0F;
+
+  if (isBusy == true)
+  {
+    // writeBit(dataframe, startDFBits + 1, true);
+    // writeBit(dataframe, startDFBits, true);
+
+    // clear busy dfplayer
+    dataframe |= (1 << (startDFBits + 1));
+
+    // //write enable dfplayer
+    dataframe |= (1 << startDFBits);
+
+    // clear df 4-bit before overwrite
+    dataframe &= ~(0x0F << (startDFBits + 2));
+
+    // write num of track
+    dataframe |= (track4Bit << (startDFBits + 2));
+  }
+}
+
 void emoActivate()
 {
   xEventGroupSetBits(xRunningEventGroup, EMERG_BIT);
@@ -249,7 +289,7 @@ void emoDeactivate()
   xEventGroupClearBits(xRunningEventGroup, EMERG_BIT);
   // xTaskNotify(xOchestratorHandle, EMERG_RELEASED, eSetValueWithOverwrite);
   digitalWrite(EMO, LOW);
-    if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+  if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
   {
     enableTransmit(cabinState.shouldWrite);
     writeBit(cabinState.writtenFrame[1], 4, false);
@@ -322,46 +362,6 @@ bool readDataFrom(uint8_t slaveID, uint16_t startAddress, uint8_t numRead, uint1
     Serial.print(": ");
     Serial.println(result, HEX);
     return false;
-  }
-}
-
-void enableTransmit(bool &shouldWrite)
-{
-  shouldWrite = true;
-}
-
-void writeBit(uint16_t &value, uint8_t bit, bool state)
-{
-  if (state)
-  {
-    value |= (1 << bit); // set
-  }
-  else
-  {
-    value &= ~(1 << bit); // clear
-  }
-}
-
-void writeFrameDFPlayer(uint8_t track, uint16_t &dataframe, bool isBusy, uint8_t startDFBits)
-{
-  uint8_t track4Bit = track & 0x0F;
-
-  if (isBusy == true)
-  {
-    // writeBit(dataframe, startDFBits + 1, true);
-    // writeBit(dataframe, startDFBits, true);
-
-    // clear busy dfplayer
-    dataframe |= (1 << (startDFBits + 1));
-
-    // //write enable dfplayer
-    dataframe |= (1 << startDFBits);
-
-    // clear df 4-bit before overwrite
-    dataframe &= ~(0x0F << (startDFBits + 2));
-
-    // write num of track
-    dataframe |= (track4Bit << (startDFBits + 2));
   }
 }
 
@@ -1389,32 +1389,31 @@ void vOchestrator(void *pvParams)
         // abortMotion();
         Serial.println("sling!!!");
         elevator.state = STATE_EMERGENCY;
-        abortMotion();
+        // abortMotion();
+        M_STP();
+        BRK_ON();
 
-        if (elevator.pos > 1 && elevator.btwFloor == true)
+        if (elevator.btwFloor == false)
         {
-          if (elevator.dir == DIR_UP)
+          elevator.target = elevator.pos;
+        }
+        else
+        {
+          if (elevator.dir = DIR_UP)
           {
-            command.dir = DIR_UP;
 
             elevator.target = elevator.pos + 1;
-            command.target = elevator.target;
           }
           else
           {
 
-            command.dir = DIR_UP;
-
             elevator.target = elevator.pos;
-            command.target = elevator.target;
           }
         }
-        else if (elevator.pos == 1 && elevator.btwFloor == false)
-        {
-          command.dir = DIR_UP;
-          elevator.target = 1;
-          command.target = elevator.target;
-        }
+
+        elevator.dir = DIR_UP;
+        command.dir = elevator.dir;
+        command.target = elevator.target;
 
         if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
         {
@@ -1634,7 +1633,7 @@ void vOchestrator(void *pvParams)
 
       if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
       {
-        writeFrameDFPlayer(SF_1013, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+        // writeFrameDFPlayer(SF_1013, cabinState.writtenFrame[1], cabinState.isBusy, 6);
         enableTransmit(cabinState.shouldWrite);
         writeBit(cabinState.writtenFrame[1], 3, true);
         xSemaphoreGive(dataMutex);
@@ -2719,10 +2718,6 @@ void setup()
     Serial.println("Error: Cannot create Event Group!");
   }
 
-  M_STP();
-  BRK_ON();
-  emoDeactivate();
-
   // xSemTransit = xSemaphoreCreateBinary();
   // xSemDoneTransit = xSemaphoreCreateBinary();
   // xSemLanding = xSemaphoreCreateBinary();
@@ -2769,6 +2764,10 @@ void setup()
   Serial.println(ESP.getFreeHeap());
   Serial.println(F("Setup complete."));
   delay(500);
+
+  M_STP();
+  BRK_ON();
+  emoDeactivate();
 }
 
 void loop()
