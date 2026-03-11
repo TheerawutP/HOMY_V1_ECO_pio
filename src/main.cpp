@@ -1399,7 +1399,7 @@ void vOchestrator(void *pvParams)
         }
         else
         {
-          if (elevator.dir = DIR_UP)
+          if (elevator.dir == DIR_UP)
           {
 
             elevator.target = elevator.pos + 1;
@@ -1565,7 +1565,7 @@ void vOchestrator(void *pvParams)
 
         if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
         {
-          writeFrameDFPlayer(SF_1003, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+          writeFrameDFPlayer(SF_1014, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           enableTransmit(cabinState.shouldWrite);
           writeBit(cabinState.writtenFrame[1], 2, false);
           writeBit(cabinState.writtenFrame[1], 1, false);
@@ -1581,7 +1581,7 @@ void vOchestrator(void *pvParams)
 
         if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
         {
-          writeFrameDFPlayer(SF_1003, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+          writeFrameDFPlayer(SF_1015, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           enableTransmit(cabinState.shouldWrite);
           writeBit(cabinState.writtenFrame[1], 2, false);
           writeBit(cabinState.writtenFrame[1], 1, false);
@@ -1692,27 +1692,7 @@ void vOchestrator(void *pvParams)
       {
         elevator.state = STATE_IDLE;
       }
-      // if (inverterState.digitalInput == INVERTER_DI_STOP)
-      // {
-      //   xTaskNotify(xOchestratorHandle, clearCommand, eSetValueWithOverwrite);
-      // }
 
-      // if (cabinState.isDoorClosed == false)
-      // {
-      //   xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-      // }
-
-      // if (cabinState.isEmergStop == true)
-      // {
-      //   emoActivate();
-      //   abortMotion();
-      //   emoDeactivate();
-      // }
-
-      // if (vsgState.shouldPause == true)
-      // {
-      //   xTaskNotify(xOchestratorHandle, emergStop, eSetValueWithOverwrite);
-      // }
 
       if (xQueueReceive(xQueueCommand, &userCommand, 0) == pdPASS)
       {
@@ -1722,7 +1702,7 @@ void vOchestrator(void *pvParams)
         {
           if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
           {
-            writeFrameDFPlayer(SF_1013, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+            writeFrameDFPlayer(SF_1003, cabinState.writtenFrame[1], cabinState.isBusy, 6);
             enableTransmit(cabinState.shouldWrite);
             writeBit(cabinState.writtenFrame[1], 2, false);
             writeBit(cabinState.writtenFrame[1], 1, false);
@@ -1889,35 +1869,7 @@ void vPollingModbusMaster(void *pvParams)
 
   for (;;)
   {
-    // bool needWrite = false;
-    // uint16_t valToWrite = 0;
 
-    // if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
-    // {
-
-    //   if (cabinState.shouldWrite)
-    //   {
-    //     needWrite = true;
-    //     valToWrite = cabinState.writtenFrame[1];
-    //     cabinState.shouldWrite = false;
-    //   }
-    //   xSemaphoreGive(dataMutex);
-    // }
-
-    // if (needWrite)
-    // {
-    //   // node.begin(CABIN_ID, Serial1);
-    //   // result = node.writeSingleRegister(0x0001, valToWrite);
-    //   // if (result != node.ku8MBSuccess)
-    //   // {
-    //   //   Serial.printf("Write Error: 0x%02X\n", result);
-    //   // }
-
-    //   node.begin(VSG_ID, Serial1);
-    //   result = node.writeSingleRegister(0x0001, valToWrite);
-
-    //   vTaskDelay(pdMS_TO_TICKS(50)); // silence between mb package
-    // }
 
     switch (currStation)
     {
@@ -2254,109 +2206,6 @@ void vPollingSafetySling(void *pvParams)
   }
 }
 
-// void ARDUINO_ISR_ATTR ISR_OverSpeed()
-// {
-//   unsigned long now = millis();
-//   if (now - lastTimeCount < minSpeedPeriod)
-//   {
-//     overSpeed_counter++;
-//   }
-//   else
-//   {
-//     overSpeed_counter = 0;
-//   }
-
-//   lastTimeCount = now;
-
-//   if (overSpeed_counter > overSpeed_threshold)
-//   {
-//     Serial.println("OverSpeed!!!!");
-//     emoActivate();
-//     M_STP();
-//     BRK_ON();
-
-//     overSpeed_counter = 0;
-//   }
-//   // portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-// }
-
-// void ARDUINO_ISR_ATTR ISR_OverSpeed()
-// {
-//   TickType_t now = xTaskGetTickCountFromISR();
-
-//   TickType_t diff = now - lastTimeCount;
-
-//   lastTimeCount = now;
-
-//   if (diff < pdMS_TO_TICKS(500)) // neglect on-off within 300 ms
-//   {
-//     return;
-//   }
-
-//   if (diff < pdMS_TO_TICKS(minSpeedPeriod))
-//   {
-//     overSpeed_counter++;
-//   }
-//   else
-//   {
-//     overSpeed_counter = 1;
-//   }
-
-//   if (overSpeed_counter >= overSpeed_threshold)
-//   {
-//     overSpeed_counter = 0;
-
-//     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-//     xTaskNotifyFromISR(xOchestratorHandle, OVERSPEED, eSetValueWithOverwrite, &xHigherPriorityTaskWoken);
-//     if (xHigherPriorityTaskWoken)
-//     {
-//       portYIELD_FROM_ISR();
-//     }
-//   }
-// }
-
-// void vPollingSpeedGovernor(void *pvParams)
-// {
-//   bool lastPinState = HIGH;
-//   unsigned long lastEdgeTime = 0;
-//   // uint8_t overSpeed_counter = 0;
-
-//   for (;;)
-//   {
-//     bool currentPinState = digitalRead(speedGovernor);
-
-//     if (lastPinState == HIGH && currentPinState == LOW)
-//     {
-//       unsigned long now = millis();
-//       unsigned long diff = now - lastEdgeTime;
-//       lastEdgeTime = now;
-
-//       if (diff > 50)
-//       {
-//         if ((diff <= upper_bound_speed_interval) && (diff >= lower_bound_speed_interval))
-//         {
-//           overSpeed_counter = 1;
-//         }
-//         else if( diff < upper_bound_speed_interval){
-//           overSpeed_counter++;
-//         }
-
-//         if (overSpeed_counter >= overSpeed_threshold)
-//         {
-//           overSpeed_counter = 0;
-//           Serial.println(">> OVERSPEED DETECTED (via Polling) !!!");
-
-//           xTaskNotify(xOchestratorHandle, OVERSPEED, eSetValueWithOverwrite);
-//         }
-//       }
-//     }
-
-//     lastPinState = currentPinState; // จำสถานะไว้เทียบรอบหน้า
-
-//     vTaskDelay(pdMS_TO_TICKS(10));
-//   }
-// }
-
 void vPollingSpeedGovernor(void *pvParams)
 {
   bool lastPinState = digitalRead(speedGovernor);
@@ -2590,7 +2439,7 @@ void vStatusLogger(void *pvParams)
   for (;;)
   {
 
-    if (elevator.pos != lastPOS || elevator.btwFloor != lastBtw)
+    if (elevator.pos != lastPOS || elevator.btwFloor != lastBtw){
       // if (elevator.pos != lastPOS)
       // {
         
@@ -2599,6 +2448,7 @@ void vStatusLogger(void *pvParams)
         lastPOS = elevator.pos;
         lastBtw = elevator.btwFloor;
       // }
+    }
     vTaskDelay(3000);
   }
 }
