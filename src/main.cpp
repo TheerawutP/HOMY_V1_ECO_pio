@@ -15,6 +15,7 @@
 #include <Preferences.h>
 #include "elevatorTypes.h"
 #include "elevatorStorage.h"
+#include <esp_now.h>
 
 #define PIN_RX 16
 #define PIN_TX 17
@@ -35,6 +36,7 @@
 // #define RST_SYS 4
 // #define MB_RX 26
 // #define MB_TX 27
+#define MASTER_ID 100
 
 #define toFloor1 174744
 #define toFloor2 174740
@@ -182,6 +184,35 @@ inverter_t inverterState = {
 vsg_t vsgState = {
     .isAlarm = {0},
     .shouldPause = false};
+
+uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+uint8_t stationMac[5][6] = {};
+bool stationReady[5] = {};
+typedef struct struct_message
+{
+  uint8_t stationID;
+  uint8_t pollFromStation;
+  uint16_t commandFromMaster;
+  uint16_t replyToMaster;
+} struct_message;
+
+struct_message recvData;
+struct_message sendData;
+
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
+{
+  memcpy(&recvData, incomingData, sizeof(recvData));
+  if (!esp_now_is_peer_exist(mac))
+  {
+    esp_now_peer_info_t peer = {};
+    memcpy(peer.peer_addr, mac, 6);
+    peer.encrypt = false;
+    esp_now_add_peer(&peer);
+    memcpy(stationMac[recvData.stationID], mac, 6);
+    stationReady[recvData.stationID] = true;
+    Serial.printf("Station %d peer registered\n", recvData.stationID);
+  }
+}
 
 // while sleep param
 
@@ -1693,7 +1724,6 @@ void vOchestrator(void *pvParams)
         elevator.state = STATE_IDLE;
       }
 
-
       if (xQueueReceive(xQueueCommand, &userCommand, 0) == pdPASS)
       {
         commandType_t cmd = userCommand.type;
@@ -1869,7 +1899,6 @@ void vPollingModbusMaster(void *pvParams)
 
   for (;;)
   {
-
 
     switch (currStation)
     {
@@ -2065,6 +2094,146 @@ void vPollingModbusMaster(void *pvParams)
         break;
       }
       xSemaphoreGive(modbusMutex);
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(modbusDelayTime));
+  }
+}
+
+void vESP_NOW(void *pvParams)
+{
+
+  static bool lastDoorState = true;
+  static bool lastVtgState = false;
+  static bool lastVsgState = false;
+  static bool lastEmergStop = false;
+
+  uint8_t stationID;
+  uint8_t pollFromStation;
+  uint16_t commandFromMaster;
+  uint16_t replyToMaster;
+
+  for (;;)
+  {
+    if (cabinState.shouldWrite == true)
+    {
+      Serial.println("--------------------------------ESP-NOW sent to CABIN_STA---------------------------");
+      sendData.pollFromStation = 2;
+      sendData.commandFromMaster = cabinState.writtenFrame[1];
+ 
+        esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&sendData, sizeof(sendData));
+        if (result == ESP_OK)
+        {
+          Serial.println("boardcast success!");
+          recvData.pollFromStation = 0;
+        }
+        else
+        {
+          Serial.println("boardcast fail!");
+          // retry
+        }
+      
+      cabinState.shouldWrite = false;
+    }
+
+    if (recvData.pollFromStation == MASTER_ID)
+    {
+
+      if (recvData.stationID == 2)
+      {
+
+        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+        {
+          cabinState.isDoorClosed = recvData.replyToMaster & (1 << 0);
+          cabinState.isAim2 = recvData.replyToMaster & (1 << 1);
+          cabinState.isAim1 = recvData.replyToMaster & (1 << 2);
+          cabinState.isUserStop = recvData.replyToMaster & (1 << 3);
+          cabinState.isEmergStop = recvData.replyToMaster & (1 << 4);
+          cabinState.isBusy = recvData.replyToMaster & (1 << 5);
+          cabinState.vtgAlarm = recvData.replyToMaster & (1 << 6);
+          xSemaphoreGive(dataMutex);
+        }
+      }
+
+      if (cabinState.isAim2)
+      {
+        Serial.println("received toFloor1 cmd");
+        if (elevator.state == STATE_IDLE)
+        {
+          userCommand_t userCommand; // target, type, from
+          userCommand.target = 2;
+          userCommand.type = moveToFloor;
+          userCommand.from = FROM_CABIN;
+          xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+        }
+      }
+
+      if (cabinState.isAim1)
+      {
+        Serial.println("received toFloor1 cmd");
+        if (elevator.state == STATE_IDLE)
+        {
+          userCommand_t userCommand; // target, type, from
+          userCommand.target = 1;
+          userCommand.type = moveToFloor;
+          userCommand.from = FROM_CABIN;
+          xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+        }
+      }
+
+      if (cabinState.isUserStop)
+      {
+        Serial.println("received STOP cmd");
+        emoDeactivate();
+        if (elevator.state == STATE_RUNNING)
+        {
+          userCommand_t userCommand; // target, type, from
+          userCommand.target = 0;
+          userCommand.type = userAbort;
+          userCommand.from = FROM_CABIN;
+          xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+        }
+      }
+
+      if (cabinState.isDoorClosed != lastDoorState)
+      {
+
+        if (cabinState.isDoorClosed == true)
+        {
+
+          xTaskNotify(xOchestratorHandle, DOOR_IS_CLOSED, eSetValueWithOverwrite);
+        }
+        else
+        {
+          if (elevator.state != STATE_EMERGENCY)
+          {
+            xTaskNotify(xOchestratorHandle, DOOR_IS_OPEN, eSetValueWithOverwrite);
+          }
+        }
+        lastDoorState = cabinState.isDoorClosed;
+      }
+
+      if (cabinState.isEmergStop != lastEmergStop)
+      {
+        if (cabinState.isEmergStop == true)
+        {
+          xTaskNotify(xOchestratorHandle, EMERG_PRESSED, eSetValueWithOverwrite);
+        }
+        lastEmergStop = cabinState.isEmergStop;
+      }
+
+      if (cabinState.vtgAlarm != lastVtgState)
+      {
+        if (cabinState.vtgAlarm == true && elevator.state != STATE_EMERGENCY)
+        {
+          xTaskNotify(xOchestratorHandle, VTG_ALARM, eSetValueWithOverwrite);
+        }
+        else
+        {
+          xTaskNotify(xOchestratorHandle, VTG_CLEAR, eSetValueWithOverwrite);
+        }
+        lastVtgState = cabinState.vtgAlarm;
+      }
     }
 
     vTaskDelay(pdMS_TO_TICKS(modbusDelayTime));
@@ -2439,14 +2608,15 @@ void vStatusLogger(void *pvParams)
   for (;;)
   {
 
-    if (elevator.pos != lastPOS || elevator.btwFloor != lastBtw){
+    if (elevator.pos != lastPOS || elevator.btwFloor != lastBtw)
+    {
       // if (elevator.pos != lastPOS)
       // {
-        
-        saveStatus();
 
-        lastPOS = elevator.pos;
-        lastBtw = elevator.btwFloor;
+      saveStatus();
+
+      lastPOS = elevator.pos;
+      lastBtw = elevator.btwFloor;
       // }
     }
     vTaskDelay(3000);
@@ -2556,6 +2726,20 @@ void setup()
   Serial.println(WiFi.localIP());
   setupMQTT();
 
+  if (esp_now_init() != ESP_OK)
+  {
+    Serial.println("ESP-NOW init failed");
+  }
+  esp_now_register_recv_cb(OnDataRecv);
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 0;  // ใช้ 0 เพื่อให้ตรงกับช่อง Wi-Fi ปัจจุบัน
+  peerInfo.encrypt = false;
+if (esp_now_add_peer(&peerInfo) != ESP_OK){
+    Serial.println("Failed to add broadcast peer");
+    return;
+  }
+
   pinMode(WIFI_READY, OUTPUT);
   pinMode(R_UP, OUTPUT);
   pinMode(R_DW, OUTPUT);
@@ -2620,6 +2804,7 @@ void setup()
 
   // xTaskCreate(vProcessData, "ProcessData", 4093, NULL, 5, &xProcessDataHandle);
   xTaskCreate(vPollingModbusMaster, "ModbusMaster", 4096, NULL, 5, &xPollingModbusMasterHandle);
+  xTaskCreate(vESP_NOW, "ESP_NOW", 4096, NULL, 5, NULL);
   // xTaskCreate(vPollingModbus, "PollingModbus", 3072, NULL, 5, &xPollingModbusHandle);
   // xTaskCreate(vWriteStation, "WriteStation", 3072, NULL, 4, &xWriteStationHandle);
 
@@ -2645,6 +2830,7 @@ void setup()
   M_STP();
   BRK_ON();
   emoDeactivate();
+  Serial.print("wifi chan: "); Serial.println(WiFi.channel());
 }
 
 void loop()
