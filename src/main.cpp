@@ -187,7 +187,7 @@ vsg_t vsgState = {
 
 uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 uint8_t CABIN_MAC[6] = {0x94, 0x54, 0xC5, 0xB2, 0x2A, 0xEC};
-uint8_t VSG_MAC[6] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+uint8_t VSG_MAC[6] = {0x94, 0x54, 0xC5, 0xB1, 0x6A, 0x70};
 typedef struct struct_message
 {
   uint8_t fromID;
@@ -1364,7 +1364,7 @@ void checkUpdatePos(uint8_t reachedFloorNum)
 {
   if ((reachedFloorNum > 0) && (reachedFloorNum == elevator.target))
   {
-    
+
     if (elevator.state == STATE_EMERGENCY)
     {
       Serial.println("Clear Emergency!!!");
@@ -2189,7 +2189,7 @@ void vESP_NOW(void *pvParams)
       sendData.responseFrame = 0;
       sendData.shouldResponse = true;
 
-      result = esp_now_send(VSG_MAC, (uint8_t *)&sendData, sizeof(sendData));
+      // result = esp_now_send(VSG_MAC, (uint8_t *)&sendData, sizeof(sendData));
       // if (result == ESP_OK)
       // {
       //   // Serial.println("boardcast success!");
@@ -2819,7 +2819,7 @@ void setup()
   esp_now_peer_info_t peerInfo = {};
   memcpy(peerInfo.peer_addr, broadcastAddress, 6);
   memcpy(peerInfo.peer_addr, CABIN_MAC, 6);
-  // memcpy(peerInfo.peer_addr, VSG_MAC, 6);
+  memcpy(peerInfo.peer_addr, VSG_MAC, 6);
   peerInfo.channel = 0;
   peerInfo.encrypt = false;
 
