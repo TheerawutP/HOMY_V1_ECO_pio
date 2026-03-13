@@ -1364,10 +1364,22 @@ void checkUpdatePos(uint8_t reachedFloorNum)
 {
   if ((reachedFloorNum > 0) && (reachedFloorNum == elevator.target))
   {
+    
     if (elevator.state == STATE_EMERGENCY)
     {
       Serial.println("Clear Emergency!!!");
+      if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+      {
+        enableTransmit(cabinState.shouldWrite);
+        writeBit(cabinState.writtenFrame[1], 4, false);
+        writeBit(cabinState.writtenFrame[1], 3, true);
+        writeBit(cabinState.writtenFrame[1], 2, false);
+        writeBit(cabinState.writtenFrame[1], 1, false);
+        writeBit(cabinState.writtenFrame[1], 0, false);
+        xSemaphoreGive(dataMutex);
+      }
     }
+
     M_STP();
     BRK_ON();
     elevator.pos = reachedFloorNum;
