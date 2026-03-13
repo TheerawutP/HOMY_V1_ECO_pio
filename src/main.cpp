@@ -1399,6 +1399,7 @@ void vOchestrator(void *pvParams)
   const unsigned long IDLE_TIMEOUT = 10 * 60 * 1000;
 
   uint32_t lastCommandTime = 0;
+  esp_err_t result;
 
   for (;;)
   {
@@ -1451,8 +1452,10 @@ void vOchestrator(void *pvParams)
           writeFrameDFPlayer(SF_1008, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           enableTransmit(cabinState.shouldWrite);
           writeBit(cabinState.writtenFrame[1], 4, true);
+          writeBit(cabinState.writtenFrame[1], 3, false);
           writeBit(cabinState.writtenFrame[1], 2, false);
           writeBit(cabinState.writtenFrame[1], 1, false);
+          writeBit(cabinState.writtenFrame[1], 0, true);
           xSemaphoreGive(dataMutex);
         }
 
@@ -1470,6 +1473,9 @@ void vOchestrator(void *pvParams)
           {
             writeFrameDFPlayer(SF_1009, cabinState.writtenFrame[1], cabinState.isBusy, 6);
             enableTransmit(cabinState.shouldWrite);
+            writeBit(cabinState.writtenFrame[1], 3, true);
+            writeBit(cabinState.writtenFrame[1], 2, false);
+            writeBit(cabinState.writtenFrame[1], 1, false);
           }
           xSemaphoreGive(dataMutex);
         }
@@ -1509,6 +1515,9 @@ void vOchestrator(void *pvParams)
         {
           writeFrameDFPlayer(SF_1005, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           enableTransmit(cabinState.shouldWrite);
+          writeBit(cabinState.writtenFrame[1], 3, true);
+          writeBit(cabinState.writtenFrame[1], 2, false);
+          writeBit(cabinState.writtenFrame[1], 1, false);
           xSemaphoreGive(dataMutex);
         }
         break;
@@ -1647,6 +1656,11 @@ void vOchestrator(void *pvParams)
         {
           writeFrameDFPlayer(SF_1008, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           enableTransmit(cabinState.shouldWrite);
+          writeBit(cabinState.writtenFrame[1], 4, true);
+          writeBit(cabinState.writtenFrame[1], 3, false);
+          writeBit(cabinState.writtenFrame[1], 2, false);
+          writeBit(cabinState.writtenFrame[1], 1, true);
+          writeBit(cabinState.writtenFrame[1], 0, true);
           xSemaphoreGive(dataMutex);
         }
         break;
