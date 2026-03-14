@@ -2816,17 +2816,43 @@ void setup()
     Serial.println("ESP-NOW init failed");
   }
   esp_now_register_recv_cb(OnDataRecv);
-  esp_now_peer_info_t peerInfo = {};
-  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-  memcpy(peerInfo.peer_addr, CABIN_MAC, 6);
-  memcpy(peerInfo.peer_addr, VSG_MAC, 6);
-  peerInfo.channel = 0;
-  peerInfo.encrypt = false;
 
-  if (esp_now_add_peer(&peerInfo) != ESP_OK)
-  {
+  // esp_now_peer_info_t peerInfo = {};
+  // memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  // memcpy(peerInfo.peer_addr, CABIN_MAC, 6);
+  // memcpy(peerInfo.peer_addr, VSG_MAC, 6);
+  // peerInfo.channel = 0;
+  // peerInfo.encrypt = false;
+
+  // if (esp_now_add_peer(&peerInfo) != ESP_OK)
+  // {
+  //   Serial.println("Failed to add broadcast peer");
+  //   return;
+  // }
+
+
+  esp_now_peer_info_t peerBroadcast = {};
+  memcpy(peerBroadcast.peer_addr, broadcastAddress, 6);
+  peerBroadcast.channel = 0;
+  peerBroadcast.encrypt = false;
+  if (esp_now_add_peer(&peerBroadcast) != ESP_OK) {
     Serial.println("Failed to add broadcast peer");
-    return;
+  }
+
+  esp_now_peer_info_t peerCabin = {};
+  memcpy(peerCabin.peer_addr, CABIN_MAC, 6);
+  peerCabin.channel = 0;
+  peerCabin.encrypt = false;
+  if (esp_now_add_peer(&peerCabin) != ESP_OK) {
+    Serial.println("Failed to add Cabin peer");
+  }
+
+  esp_now_peer_info_t peerVsg = {};
+  memcpy(peerVsg.peer_addr, VSG_MAC, 6);
+  peerVsg.channel = 0;
+  peerVsg.encrypt = false;
+  if (esp_now_add_peer(&peerVsg) != ESP_OK) {
+    Serial.println("Failed to add VSG peer");
   }
 
   pinMode(WIFI_READY, OUTPUT);
