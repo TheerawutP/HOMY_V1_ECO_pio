@@ -45,6 +45,71 @@
 #define INVERTER_DI_STOP 992
 #define INVERTER_DI_EMO 5092
 
+// remote set2
+#define toFloor1_2 12418580
+#define toFloor2_2 12418584
+#define STOP_2 12418578
+#define EM_remote_2 12418577
+
+// remote set3
+#define toFloor1_3 16003636
+#define toFloor2_3 16003640
+#define STOP_3 16003634
+#define EM_remote_3 16003633
+
+// remote set4
+#define toFloor1_4 16751236
+#define toFloor2_4 16751240
+#define STOP_4 16751234
+#define EM_remote_4 16751233
+
+typedef enum
+{
+  BTN_TO_FLOOR_1,
+  BTN_TO_FLOOR_2,
+  BTN_TO_FLOOR_3,
+  BTN_TO_FLOOR_4,
+  BTN_TO_FLOOR_5,
+  BTN_TO_FLOOR_6,
+  BTN_STOP,
+  BTN_EMERGENCY,
+  BTN_UNKNOWN
+} RF_ButtonType;
+
+typedef struct
+{
+  unsigned long rfCode; 
+  RF_ButtonType type;   
+} RF_KeyMap;
+
+const RF_KeyMap rfKeys[] = {
+  // --- set 1 ---
+  // {toFloor1, BTN_TO_FLOOR_1},
+  // {toFloor2, BTN_TO_FLOOR_2},
+  // {STOP, BTN_STOP},
+  // {EM_remote_1, BTN_EMERGENCY}, 
+  
+  // --- set 2 ---
+  {toFloor1_2, BTN_TO_FLOOR_1},
+  {toFloor2_2, BTN_TO_FLOOR_2},
+  {STOP_2, BTN_STOP},
+  // {EM_remote_2, BTN_EMERGENCY},
+
+  // --- set 3 ---
+  {toFloor1_3, BTN_TO_FLOOR_1},
+  {toFloor2_3, BTN_TO_FLOOR_2},
+  {STOP_3, BTN_STOP},
+  // {EM_remote_3, BTN_EMERGENCY},
+
+    // --- set 4 ---
+  {toFloor1_4, BTN_TO_FLOOR_1},
+  {toFloor2_4, BTN_TO_FLOOR_2},
+  {STOP_4, BTN_STOP}
+  // {EM_remote_4, BTN_EMERGENCY},
+};
+
+const int numRfKeys = sizeof(rfKeys) / sizeof(RF_KeyMap);
+
 #define SF_0000 0
 #define SF_1001 1  // going up
 #define SF_1002 2  // going dw
@@ -1579,6 +1644,8 @@ void vOchestrator(void *pvParams)
         {
           writeFrameDFPlayer(SF_1016, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           enableTransmit(cabinState.shouldWrite);
+          writeBit(cabinState.writtenFrame[1], 4, true);
+          writeBit(cabinState.writtenFrame[1], 3, false);
           writeBit(cabinState.writtenFrame[1], 2, false);
           writeBit(cabinState.writtenFrame[1], 1, false);
           xSemaphoreGive(dataMutex);
@@ -1786,98 +1853,194 @@ void vOchestrator(void *pvParams)
   }
 }
 
+// void vRFReceiver(void *pvParams)
+// {
+//   userCommand_t userCommand; // target, type, from
+//   static unsigned long lastTimeCmd1 = 0;
+//   static unsigned long lastTimeCmd2 = 0;
+//   const unsigned long DEBOUNCE_DELAY = 3000;
+
+//   for (;;)
+//   {
+//     int cmd = 0;
+//     unsigned long now = millis();
+
+//     if (RF.available())
+//     {
+//       cmd = RF.getReceivedValue();
+//       RF.resetAvailable();
+//     }
+
+//     switch (cmd)
+//     {
+//     case toFloor1:
+//       if (now - lastTimeCmd1 > DEBOUNCE_DELAY)
+//       {
+//         lastTimeCmd1 = now;
+
+//         // if (elevator.pos == 0)
+//         // {
+//         //   POS = 1;
+//         // }
+
+//         Serial.println("received toFloor1 cmd");
+//         if (elevator.state == STATE_IDLE)
+//         {
+//           userCommand.target = 1;
+//           userCommand.type = moveToFloor;
+//           userCommand.from = FROM_RF;
+//           xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+//         }
+//       }
+//       else
+//       {
+//         Serial.println("toFloor1 Ignored (Debounce 5s)");
+//       }
+//       break;
+
+//     case toFloor2:
+//       if (now - lastTimeCmd2 > DEBOUNCE_DELAY)
+//       {
+//         lastTimeCmd2 = now;
+
+//         Serial.println("received toFloor2 cmd");
+//         if (elevator.state == STATE_IDLE)
+//         {
+//           userCommand.target = 2;
+//           userCommand.type = moveToFloor;
+//           userCommand.from = FROM_RF;
+//           xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+//         }
+//       }
+//       else
+//       {
+//         Serial.println("toFloor2 Ignored (Debounce 5s)");
+//       }
+//       break;
+
+//       // case POWER_CUT:
+//       //   Serial.println("received POWER CUT! cmd");
+//       //   strcpy(publish_status.cmd, "POWER_CUT!");
+//       //   digitalWrite(R_POWER_CUT, LOW);
+//       //   xTimerStart(xPowerCutTimer, 0);
+//       //   break;
+
+//     case STOP:
+//       Serial.println("received STOP cmd");
+//       emoDeactivate();
+//       if (elevator.state == STATE_RUNNING)
+//       {
+//         userCommand.target = 0;
+//         userCommand.type = userAbort;
+//         userCommand.from = FROM_RF;
+//         xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+
+//         lastTimeCmd1 = 0;
+//         lastTimeCmd2 = 0;
+//       }
+//       break;
+//     }
+//     vTaskDelay(pdMS_TO_TICKS(50));
+//   }
+// }
+
 void vRFReceiver(void *pvParams)
 {
-  userCommand_t userCommand; // target, type, from
+  userCommand_t userCommand; 
   static unsigned long lastTimeCmd1 = 0;
   static unsigned long lastTimeCmd2 = 0;
-  const unsigned long DEBOUNCE_DELAY = 3000;
+  const unsigned long DEBOUNCE_DELAY = 3000; 
 
   for (;;)
   {
-    int cmd = 0;
+    unsigned long cmd = 0; 
     unsigned long now = millis();
 
     if (RF.available())
     {
       cmd = RF.getReceivedValue();
       RF.resetAvailable();
-    }
+      
+      if (cmd == 0) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        continue; 
+      }
+      
+      Serial.printf(">> RF Received Code: %lu\n", cmd);
 
-    switch (cmd)
-    {
-    case toFloor1:
-      if (now - lastTimeCmd1 > DEBOUNCE_DELAY)
-      {
-        lastTimeCmd1 = now;
-
-        // if (elevator.pos == 0)
-        // {
-        //   POS = 1;
-        // }
-
-        Serial.println("received toFloor1 cmd");
-        if (elevator.state == STATE_IDLE)
-        {
-          userCommand.target = 1;
-          userCommand.type = moveToFloor;
-          userCommand.from = FROM_RF;
-          xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+      RF_ButtonType pressedBtn = BTN_UNKNOWN;
+      for (int i = 0; i < numRfKeys; i++) {
+        if (rfKeys[i].rfCode == cmd) {
+          pressedBtn = rfKeys[i].type;
+          break; 
         }
       }
-      else
+
+      switch (pressedBtn)
       {
-        Serial.println("toFloor1 Ignored (Debounce 5s)");
+        case BTN_TO_FLOOR_1:
+          if (now - lastTimeCmd1 > DEBOUNCE_DELAY)
+          {
+            lastTimeCmd1 = now;
+            Serial.println(">> RF Command: TO FLOOR 1");
+            if (elevator.state == STATE_IDLE)
+            {
+              userCommand.target = 1;
+              userCommand.type = moveToFloor;
+              userCommand.from = FROM_RF;
+              xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+            }
+          }
+          break;
+
+        case BTN_TO_FLOOR_2:
+          if (now - lastTimeCmd2 > DEBOUNCE_DELAY)
+          {
+            lastTimeCmd2 = now;
+            Serial.println(">> RF Command: TO FLOOR 2");
+            if (elevator.state == STATE_IDLE)
+            {
+              userCommand.target = 2;
+              userCommand.type = moveToFloor;
+              userCommand.from = FROM_RF;
+              xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+            }
+          }
+          break;
+
+        case BTN_STOP:
+          Serial.println(">> RF Command: STOP");
+          emoDeactivate(); 
+          if (elevator.state == STATE_RUNNING)
+          {
+            userCommand.target = 0;
+            userCommand.type = userAbort;
+            userCommand.from = FROM_RF;
+            xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+
+            lastTimeCmd1 = 0;
+            lastTimeCmd2 = 0;
+          }
+          break;
+
+        // case BTN_EMERGENCY:
+        //   Serial.println(">> RF Command: EMERGENCY LOCK");
+        //   // xTaskNotify(xOchestratorHandle, EMERG_PRESSED, eSetValueWithOverwrite);
+        //   break;
+
+        case BTN_UNKNOWN:
+        default:
+          break;
       }
-      break;
-
-    case toFloor2:
-      if (now - lastTimeCmd2 > DEBOUNCE_DELAY)
-      {
-        lastTimeCmd2 = now;
-
-        Serial.println("received toFloor2 cmd");
-        if (elevator.state == STATE_IDLE)
-        {
-          userCommand.target = 2;
-          userCommand.type = moveToFloor;
-          userCommand.from = FROM_RF;
-          xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
-        }
-      }
-      else
-      {
-        Serial.println("toFloor2 Ignored (Debounce 5s)");
-      }
-      break;
-
-      // case POWER_CUT:
-      //   Serial.println("received POWER CUT! cmd");
-      //   strcpy(publish_status.cmd, "POWER_CUT!");
-      //   digitalWrite(R_POWER_CUT, LOW);
-      //   xTimerStart(xPowerCutTimer, 0);
-      //   break;
-
-    case STOP:
-      Serial.println("received STOP cmd");
-      emoDeactivate();
-      if (elevator.state == STATE_RUNNING)
-      {
-        userCommand.target = 0;
-        userCommand.type = userAbort;
-        userCommand.from = FROM_RF;
-        xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
-
-        lastTimeCmd1 = 0;
-        lastTimeCmd2 = 0;
-      }
-      break;
     }
+
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 
 // timer callbacks
+
+
 
 void vStartRunning(TimerHandle_t xTimer)
 {
@@ -2138,6 +2301,9 @@ void vESP_NOW(void *pvParams)
   uint8_t pollFromStation;
   uint16_t commandFromMaster;
   uint16_t replyToMaster;
+  
+  bool isConnected_CABIN = false;
+  bool isConnected_VSG = false;
 
   modbusStation_t currStation = CABIN_STA;
 
@@ -2173,8 +2339,10 @@ void vESP_NOW(void *pvParams)
       // sendData.commandFrame = 0;
       sendData.responseFrame = 0;
       sendData.shouldResponse = true;
-
+      
+      if(isConnected_CABIN == false){
       result = esp_now_send(CABIN_MAC, (uint8_t *)&sendData, sizeof(sendData));
+      }
       // if (result == ESP_OK)
       // {
       //   // Serial.println("boardcast success!");
@@ -2189,7 +2357,7 @@ void vESP_NOW(void *pvParams)
       sendData.responseFrame = 0;
       sendData.shouldResponse = true;
 
-      // result = esp_now_send(VSG_MAC, (uint8_t *)&sendData, sizeof(sendData));
+      result = esp_now_send(VSG_MAC, (uint8_t *)&sendData, sizeof(sendData));
       // if (result == ESP_OK)
       // {
       //   // Serial.println("boardcast success!");
@@ -2204,7 +2372,8 @@ void vESP_NOW(void *pvParams)
     /////////////////////////////////////action on bits block////////////////////////////////////
 
     if (recvData.fromID == 2)
-    {
+    { 
+      isConnected_CABIN = true;
       if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
       {
         cabinState.isDoorClosed = recvData.responseFrame & (1 << 0);
@@ -2270,7 +2439,7 @@ void vESP_NOW(void *pvParams)
     if (cabinState.isDoorClosed != lastDoorState)
     {
 
-      if (cabinState.isDoorClosed == true)
+      if (cabinState.isDoorClosed == false)
       {
 
         xTaskNotify(xOchestratorHandle, DOOR_IS_CLOSED, eSetValueWithOverwrite);
@@ -2817,25 +2986,12 @@ void setup()
   }
   esp_now_register_recv_cb(OnDataRecv);
 
-  // esp_now_peer_info_t peerInfo = {};
-  // memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-  // memcpy(peerInfo.peer_addr, CABIN_MAC, 6);
-  // memcpy(peerInfo.peer_addr, VSG_MAC, 6);
-  // peerInfo.channel = 0;
-  // peerInfo.encrypt = false;
-
-  // if (esp_now_add_peer(&peerInfo) != ESP_OK)
-  // {
-  //   Serial.println("Failed to add broadcast peer");
-  //   return;
-  // }
-
-
   esp_now_peer_info_t peerBroadcast = {};
   memcpy(peerBroadcast.peer_addr, broadcastAddress, 6);
   peerBroadcast.channel = 0;
   peerBroadcast.encrypt = false;
-  if (esp_now_add_peer(&peerBroadcast) != ESP_OK) {
+  if (esp_now_add_peer(&peerBroadcast) != ESP_OK)
+  {
     Serial.println("Failed to add broadcast peer");
   }
 
@@ -2843,7 +2999,8 @@ void setup()
   memcpy(peerCabin.peer_addr, CABIN_MAC, 6);
   peerCabin.channel = 0;
   peerCabin.encrypt = false;
-  if (esp_now_add_peer(&peerCabin) != ESP_OK) {
+  if (esp_now_add_peer(&peerCabin) != ESP_OK)
+  {
     Serial.println("Failed to add Cabin peer");
   }
 
@@ -2851,7 +3008,8 @@ void setup()
   memcpy(peerVsg.peer_addr, VSG_MAC, 6);
   peerVsg.channel = 0;
   peerVsg.encrypt = false;
-  if (esp_now_add_peer(&peerVsg) != ESP_OK) {
+  if (esp_now_add_peer(&peerVsg) != ESP_OK)
+  {
     Serial.println("Failed to add VSG peer");
   }
 
