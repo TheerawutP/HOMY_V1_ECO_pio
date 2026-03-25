@@ -360,6 +360,34 @@ static void applyEspNowPeersForStations()
   memcpy(peer.peer_addr, VTG_MAC, 6);
   esp_now_add_peer(&peer);
 }
+
+// Forward declaration (implemented later in this file)
+void sendWebsocketAlert(const char *alertType, const char *message);
+
+static void updateWifiChannel(uint8_t newChannel)
+{
+  // Channel can only be changed when we're running as AP.
+  if ((WiFi.getMode() & WIFI_AP) == 0)
+  {
+    sendWebsocketAlert("ERROR", "Cannot set WiFi channel: not in AP mode.");
+    return;
+  }
+
+  if (newChannel < 1 || newChannel > 13)
+  {
+    sendWebsocketAlert("ERROR", "Invalid WiFi channel (allowed: 1..13).");
+    return;
+  }
+
+  // Restart softAP using the requested channel.
+  // Note: clients may disconnect briefly; websocket UI may reconnect automatically.
+  WiFi.softAP("Ximplex_LuckD", "", newChannel);
+  delay(100);
+
+  Serial.printf(">> WiFi channel updated: %d\n", WiFi.channel());
+  applyEspNowPeersForStations();
+  sendWebsocketAlert("INFO", "WiFi channel updated (ESP-NOW peers re-applied).");
+}
 typedef struct struct_message
 {
   uint8_t fromID;
@@ -1187,6 +1215,17 @@ void handle_websocket_text(uint8_t *payload)
         Serial.println("Invalid vtg_mac format.");
       }
     }
+  }
+
+  int requestedWifiChannel = m_JSONdoc_from_payload["wifi_channel"].as<int>();
+  if (requestedWifiChannel <= 0)
+    requestedWifiChannel = m_JSONdoc_from_payload["wifi_channel_to"].as<int>();
+  if (requestedWifiChannel <= 0)
+    requestedWifiChannel = m_JSONdoc_from_payload["WIFI_CHANNEL"].as<int>();
+
+  if (requestedWifiChannel > 0)
+  {
+    updateWifiChannel((uint8_t)requestedWifiChannel);
   }
 
   if (anyMacUpdated)

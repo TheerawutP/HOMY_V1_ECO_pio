@@ -203,6 +203,14 @@
             </div>
           </div>
 
+          <div class="div mybox2">
+            <div class="form-box ms-5 ms-md-0">
+              <label class="form-label mb-0">WiFi Channel (AP)</label>
+              <input type="number" class="form-control p-0 border border-secondary" name="wifi_channel"
+                id="wifi_channel_id" value=6 min=1 max=13>
+            </div>
+          </div>
+
           <div class="row">
 
             <!-- <div class="col text-center border border-secondary"> -->
@@ -215,6 +223,10 @@
 
             <div class="col text-center ">
               <button type="button" class="btn btn-primary my-2" onclick="sendStationMacs()">Update MACs</button>
+            </div>
+
+            <div class="col text-center ">
+              <button type="button" class="btn btn-primary my-2" onclick="sendWifiChannel()">Update WiFi Channel</button>
             </div>
 
           </div>
@@ -287,6 +299,21 @@
       });
       ensureStationWs();
       alert("Sending MAC update over websocket...");
+    }
+
+    function sendWifiChannel() {
+      var ch = document.getElementById("wifi_channel_id")?.value?.trim() || "";
+      var chan = parseInt(ch, 10);
+      if (!chan || chan < 1 || chan > 13) {
+        alert("Please enter WiFi channel 1..13.");
+        return;
+      }
+
+      pendingMacUpdate = JSON.stringify({
+        wifi_channel: chan
+      });
+      ensureStationWs();
+      alert("Sending WiFi channel update over websocket...");
     }
   </script>
 </body>
