@@ -78,34 +78,34 @@ typedef enum
 
 typedef struct
 {
-  unsigned long rfCode; 
-  RF_ButtonType type;   
+  unsigned long rfCode;
+  RF_ButtonType type;
 } RF_KeyMap;
 
 const RF_KeyMap rfKeys[] = {
-  // --- set 1 ---
-  // {toFloor1, BTN_TO_FLOOR_1},
-  // {toFloor2, BTN_TO_FLOOR_2},
-  // {STOP, BTN_STOP},
-  // {EM_remote_1, BTN_EMERGENCY}, 
-  
-  // --- set 2 ---
-  {toFloor1_2, BTN_TO_FLOOR_1},
-  {toFloor2_2, BTN_TO_FLOOR_2},
-  {STOP_2, BTN_STOP},
-  // {EM_remote_2, BTN_EMERGENCY},
+    // --- set 1 ---
+    // {toFloor1, BTN_TO_FLOOR_1},
+    // {toFloor2, BTN_TO_FLOOR_2},
+    // {STOP, BTN_STOP},
+    // {EM_remote_1, BTN_EMERGENCY},
 
-  // --- set 3 ---
-  {toFloor1_3, BTN_TO_FLOOR_1},
-  {toFloor2_3, BTN_TO_FLOOR_2},
-  {STOP_3, BTN_STOP},
-  // {EM_remote_3, BTN_EMERGENCY},
+    // --- set 2 ---
+    {toFloor1_2, BTN_TO_FLOOR_1},
+    {toFloor2_2, BTN_TO_FLOOR_2},
+    {STOP_2, BTN_STOP},
+    // {EM_remote_2, BTN_EMERGENCY},
+
+    // --- set 3 ---
+    {toFloor1_3, BTN_TO_FLOOR_1},
+    {toFloor2_3, BTN_TO_FLOOR_2},
+    {STOP_3, BTN_STOP},
+    // {EM_remote_3, BTN_EMERGENCY},
 
     // --- set 4 ---
-  {toFloor1_4, BTN_TO_FLOOR_1},
-  {toFloor2_4, BTN_TO_FLOOR_2},
-  {STOP_4, BTN_STOP}
-  // {EM_remote_4, BTN_EMERGENCY},
+    {toFloor1_4, BTN_TO_FLOOR_1},
+    {toFloor2_4, BTN_TO_FLOOR_2},
+    {STOP_4, BTN_STOP}
+    // {EM_remote_4, BTN_EMERGENCY},
 };
 
 const int numRfKeys = sizeof(rfKeys) / sizeof(RF_KeyMap);
@@ -147,7 +147,7 @@ const int numRfKeys = sizeof(rfKeys) / sizeof(RF_KeyMap);
 // ms timings
 // #define DEBOUNCE_MS 1000
 // #define BRAKE_MS 2000
-#define WAIT_TO_RUNNING_MS 600
+#define WAIT_TO_RUNNING_MS 700
 // #define POWER_CUT_MS 3000
 
 uint8_t torque_rated_up = 80;
@@ -188,6 +188,7 @@ SemaphoreHandle_t mqttMutex; // Mutex to protect MQTT client
 SemaphoreHandle_t modbusMutex;
 SemaphoreHandle_t dataMutex;
 
+QueueHandle_t masterEspNowRxQueue;
 QueueHandle_t xQueueCommand;
 
 TaskHandle_t xOchestratorHandle;
@@ -207,6 +208,7 @@ TaskHandle_t xPollingSpeedGovernor;
 
 TimerHandle_t xStartRunningTimer;
 TimerHandle_t xProcessDataHandle;
+TimerHandle_t xIdleLightTimer;
 
 EventGroupHandle_t xRunningEventGroup;
 
@@ -215,6 +217,7 @@ WebSocketsServer m_websocketserver = WebSocketsServer(81);
 
 // WifiTool object
 const int WAIT_FOR_WIFI_TIME_OUT = 6000;
+#define IDLE_LIGHT_TIMEOUT_MS 60000
 const char *PARAM_MESSAGE = "message"; // message server receives from client
 std::unique_ptr<DNSServer> dnsServer;
 std::unique_ptr<AsyncWebServer> m_wifitools_server;
@@ -251,8 +254,9 @@ vsg_t vsgState = {
     .shouldPause = false};
 
 uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-uint8_t CABIN_MAC[6] = {0x94, 0x54, 0xC5, 0xB2, 0x2A, 0xEC};
-uint8_t VSG_MAC[6] = {0x94, 0x54, 0xC5, 0xB1, 0x6A, 0x70};
+uint8_t CABIN_MAC[6] = {0xF8, 0xB3, 0xB7, 0x4F, 0x18, 0xF4};
+uint8_t VSG_MAC[6] = {0xEC, 0xE3, 0x34, 0x1A, 0x73, 0x3C};
+uint8_t VTG_MAC[6] = {0x1C, 0xC3, 0xAB, 0xF9, 0xA4, 0x38};
 typedef struct struct_message
 {
   uint8_t fromID;
@@ -266,17 +270,28 @@ struct_message sendData;
 
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
 {
-  memcpy(&recvData, incomingData, sizeof(recvData));
-  // if (!esp_now_is_peer_exist(mac))
-  // {
-  //   esp_now_peer_info_t peer = {};
-  //   memcpy(peer.peer_addr, mac, 6);
-  //   peer.encrypt = false;
-  //   esp_now_add_peer(&peer);
-  //   memcpy(stationMac[recvData.stationID], mac, 6);
-  //   stationReady[recvData.stationID] = true;
-  //   Serial.printf("Station %d peer registered\n", recvData.stationID);
-  // }
+  struct_message tempMsg;
+
+  Serial.print(">> ESP-NOW RECV from MAC: ");
+  for (int i = 0; i < 6; i++)
+  {
+    Serial.printf("%02X", mac[i]);
+    if (i < 5)
+      Serial.print(":");
+  }
+  Serial.printf(" | Len: %d bytes\n", len);
+
+  if (len != sizeof(tempMsg))
+  {
+    Serial.println("!! ERROR: Struct Size Mismatch !!");
+  }
+
+  memcpy(&tempMsg, incomingData, sizeof(tempMsg));
+
+  Serial.printf(">> Parsed ID: %d, ResponseFrame: %d\n", tempMsg.fromID, tempMsg.responseFrame);
+
+  xQueueSend(masterEspNowRxQueue, &tempMsg, 0);
+  // memcpy(&recvData, incomingData, sizeof(recvData));
 }
 
 // while sleep param
@@ -342,23 +357,23 @@ void writeFrameDFPlayer(uint8_t track, uint16_t &dataframe, bool isBusy, uint8_t
 {
   uint8_t track4Bit = track & 0x1F;
 
-  if (isBusy == true)
-  {
-    // writeBit(dataframe, startDFBits + 1, true);
-    // writeBit(dataframe, startDFBits, true);
+  // if (isBusy == true)
+  // {
+  // writeBit(dataframe, startDFBits + 1, true);
+  // writeBit(dataframe, startDFBits, true);
 
-    // clear busy dfplayer
-    dataframe |= (1 << (startDFBits + 1));
+  // clear busy dfplayer
+  dataframe |= (1 << (startDFBits + 1));
 
-    // //write enable dfplayer
-    dataframe |= (1 << startDFBits);
+  // //write enable dfplayer
+  dataframe |= (1 << startDFBits);
 
-    // clear df 4-bit before overwrite
-    dataframe &= ~(0x1F << (startDFBits + 2));
+  // clear df 4-bit before overwrite
+  dataframe &= ~(0x1F << (startDFBits + 2));
 
-    // write num of track
-    dataframe |= (track4Bit << (startDFBits + 2));
-  }
+  // write num of track
+  dataframe |= (track4Bit << (startDFBits + 2));
+  //}
 }
 
 void emoActivate()
@@ -385,7 +400,7 @@ void emoDeactivate()
   xEventGroupClearBits(xRunningEventGroup, EMERG_BIT);
   // xTaskNotify(xOchestratorHandle, EMERG_RELEASED, eSetValueWithOverwrite);
   digitalWrite(EMO, LOW);
-  if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+  if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
   {
     enableTransmit(cabinState.shouldWrite);
     writeBit(cabinState.writtenFrame[1], 4, false);
@@ -410,6 +425,11 @@ void abortMotion()
   elevator.isBrake = true;
 
   Serial.println("Elevator Halted.");
+
+  if (xIdleLightTimer != NULL)
+  {
+    xTimerReset(xIdleLightTimer, 0);
+  }
 }
 
 bool isSafeToRun(direction_t dir)
@@ -1334,7 +1354,7 @@ void getDir(uint8_t target, transitCommand_t *cmd)
     elevator.lastTarget = newTarget;
     elevator.target = newTarget;
 
-    if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
     {
       if (newDir == DIR_UP)
       {
@@ -1378,7 +1398,7 @@ void getDir(uint8_t target, transitCommand_t *cmd)
       elevator.dir = newDir;
       elevator.target = newTarget;
 
-      if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+      if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
       {
         if (newDir == DIR_UP)
         {
@@ -1433,7 +1453,7 @@ void checkUpdatePos(uint8_t reachedFloorNum)
     if (elevator.state == STATE_EMERGENCY)
     {
       Serial.println("Clear Emergency!!!");
-      if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+      if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
       {
         enableTransmit(cabinState.shouldWrite);
         writeBit(cabinState.writtenFrame[1], 4, false);
@@ -1455,6 +1475,11 @@ void checkUpdatePos(uint8_t reachedFloorNum)
 
     reachedFloorNum = 0;
     Serial.printf("Reached Target Floor %d: Stopping...\n", elevator.pos);
+
+    if (xIdleLightTimer != NULL)
+    {
+      xTimerReset(xIdleLightTimer, 0);
+    }
   }
 }
 
@@ -1524,7 +1549,7 @@ void vOchestrator(void *pvParams)
         command.dir = elevator.dir;
         command.target = elevator.target;
 
-        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
           writeFrameDFPlayer(SF_1008, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           enableTransmit(cabinState.shouldWrite);
@@ -1544,7 +1569,7 @@ void vOchestrator(void *pvParams)
       case DOOR_IS_OPEN:
         xEventGroupSetBits(xRunningEventGroup, DOOR_OPEN_BIT);
 
-        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
           if (elevator.state == STATE_RUNNING)
           {
@@ -1568,7 +1593,7 @@ void vOchestrator(void *pvParams)
       case DOOR_IS_CLOSED:
         xEventGroupClearBits(xRunningEventGroup, DOOR_OPEN_BIT);
 
-        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
           // if (elevator.state == STATE_PAUSED)
           // {
@@ -1586,9 +1611,13 @@ void vOchestrator(void *pvParams)
 
       case VTG_ALARM:
         xEventGroupSetBits(xRunningEventGroup, VTG_BIT);
-        emoActivate();
-        abortMotion();
-        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+        Serial.println("VTG is detected!");
+        // emoActivate();
+        // abortMotion();
+        M_STP();
+        BRK_ON();
+
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
           writeFrameDFPlayer(SF_1005, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           enableTransmit(cabinState.shouldWrite);
@@ -1597,16 +1626,28 @@ void vOchestrator(void *pvParams)
           writeBit(cabinState.writtenFrame[1], 1, false);
           xSemaphoreGive(dataMutex);
         }
+
+        elevator.dir = DIR_DOWN;
+        elevator.target = 1;
+        command.dir = elevator.dir;
+        command.target = elevator.target;
+        elevator.state = STATE_PENDING;
+        // emoDeactivate();
+
+        transit(command);
+        sendWebsocketAlert("WARNING", "VTG is detected. Start to move down.");
         break;
 
       case VTG_CLEAR:
         xEventGroupClearBits(xRunningEventGroup, VTG_BIT);
-
         break;
 
       case VSG_ALARM:
         xEventGroupSetBits(xRunningEventGroup, VSG_BIT);
-        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+        M_STP();
+        BRK_ON();
+
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
           if (elevator.dir == DIR_DOWN && elevator.state == STATE_RUNNING)
           {
@@ -1617,8 +1658,14 @@ void vOchestrator(void *pvParams)
         }
         if (elevator.dir == DIR_DOWN)
         {
-          M_STP();
-          elevator.state = STATE_PAUSED;
+          elevator.dir = DIR_UP;
+          elevator.target = elevator.pos;
+          command.dir = elevator.dir;
+          command.target = elevator.target;
+          elevator.state = STATE_PENDING;
+          // emoDeactivate();
+
+          transit(command);
           sendWebsocketAlert("WARNING", "VSG is detected. Elevator paused.");
         }
         break;
@@ -1640,7 +1687,7 @@ void vOchestrator(void *pvParams)
         // xEventGroupSetBits(xRunningEventGroup, EMERG_BIT);
         emoActivate();
 
-        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
           writeFrameDFPlayer(SF_1016, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           enableTransmit(cabinState.shouldWrite);
@@ -1661,7 +1708,7 @@ void vOchestrator(void *pvParams)
 
         elevator.state = STATE_EMERGENCY;
         elevator.target = MIN_FLOOR;
-        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
           writeFrameDFPlayer(SF_1006, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           enableTransmit(cabinState.shouldWrite);
@@ -1682,7 +1729,7 @@ void vOchestrator(void *pvParams)
         elevator.btwFloor = false;
         checkUpdatePos(elevator.pos);
 
-        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
           writeFrameDFPlayer(SF_1014, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           enableTransmit(cabinState.shouldWrite);
@@ -1698,7 +1745,7 @@ void vOchestrator(void *pvParams)
         elevator.btwFloor = false;
         checkUpdatePos(elevator.pos);
 
-        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
           writeFrameDFPlayer(SF_1015, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           enableTransmit(cabinState.shouldWrite);
@@ -1731,7 +1778,7 @@ void vOchestrator(void *pvParams)
         BRK_ON();
         sendWebsocketAlert("WARNING", "Over Speed is detected. Elevator halted.");
 
-        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
           writeFrameDFPlayer(SF_1008, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           enableTransmit(cabinState.shouldWrite);
@@ -1742,6 +1789,7 @@ void vOchestrator(void *pvParams)
           writeBit(cabinState.writtenFrame[1], 0, true);
           xSemaphoreGive(dataMutex);
         }
+
         break;
 
       default:
@@ -1771,20 +1819,17 @@ void vOchestrator(void *pvParams)
 
     case STATE_IDLE:
 
-      if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
-      {
-        // writeFrameDFPlayer(SF_1013, cabinState.writtenFrame[1], cabinState.isBusy, 6);
-        enableTransmit(cabinState.shouldWrite);
-        writeBit(cabinState.writtenFrame[1], 3, true);
-        xSemaphoreGive(dataMutex);
-      }
-
       //////////////////////////////////////handle any commands from user////////////////////////////
 
       if (xQueueReceive(xQueueCommand, &userCommand, 0) == pdPASS)
       {
         commandType_t cmd = userCommand.type;
         uint8_t targetFloor = userCommand.target;
+
+        if (xIdleLightTimer != NULL)
+        {
+          xTimerStop(xIdleLightTimer, 0);
+        }
 
         lastCommandTime = millis();
         modbusDelayTime = FAST_POLL_MS;
@@ -1823,10 +1868,11 @@ void vOchestrator(void *pvParams)
         uint8_t targetFloor = userCommand.target;
         if (cmd == userAbort)
         {
-          if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
           {
             writeFrameDFPlayer(SF_1003, cabinState.writtenFrame[1], cabinState.isBusy, 6);
             enableTransmit(cabinState.shouldWrite);
+            writeBit(cabinState.writtenFrame[1], 3, true);
             writeBit(cabinState.writtenFrame[1], 2, false);
             writeBit(cabinState.writtenFrame[1], 1, false);
 
@@ -1839,6 +1885,26 @@ void vOchestrator(void *pvParams)
       break;
 
     case STATE_PAUSED:
+      if (xQueueReceive(xQueueCommand, &userCommand, 0) == pdPASS)
+      {
+        commandType_t cmd = userCommand.type;
+        uint8_t targetFloor = userCommand.target;
+        if (cmd == userAbort)
+        {
+          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
+          {
+            writeFrameDFPlayer(SF_1003, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+            enableTransmit(cabinState.shouldWrite);
+            writeBit(cabinState.writtenFrame[1], 3, true);
+            writeBit(cabinState.writtenFrame[1], 2, false);
+            writeBit(cabinState.writtenFrame[1], 1, false);
+
+            xSemaphoreGive(dataMutex);
+          }
+
+          abortMotion();
+        }
+      }
       break;
 
     case STATE_EMERGENCY:
@@ -1853,184 +1919,96 @@ void vOchestrator(void *pvParams)
   }
 }
 
-// void vRFReceiver(void *pvParams)
-// {
-//   userCommand_t userCommand; // target, type, from
-//   static unsigned long lastTimeCmd1 = 0;
-//   static unsigned long lastTimeCmd2 = 0;
-//   const unsigned long DEBOUNCE_DELAY = 3000;
-
-//   for (;;)
-//   {
-//     int cmd = 0;
-//     unsigned long now = millis();
-
-//     if (RF.available())
-//     {
-//       cmd = RF.getReceivedValue();
-//       RF.resetAvailable();
-//     }
-
-//     switch (cmd)
-//     {
-//     case toFloor1:
-//       if (now - lastTimeCmd1 > DEBOUNCE_DELAY)
-//       {
-//         lastTimeCmd1 = now;
-
-//         // if (elevator.pos == 0)
-//         // {
-//         //   POS = 1;
-//         // }
-
-//         Serial.println("received toFloor1 cmd");
-//         if (elevator.state == STATE_IDLE)
-//         {
-//           userCommand.target = 1;
-//           userCommand.type = moveToFloor;
-//           userCommand.from = FROM_RF;
-//           xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
-//         }
-//       }
-//       else
-//       {
-//         Serial.println("toFloor1 Ignored (Debounce 5s)");
-//       }
-//       break;
-
-//     case toFloor2:
-//       if (now - lastTimeCmd2 > DEBOUNCE_DELAY)
-//       {
-//         lastTimeCmd2 = now;
-
-//         Serial.println("received toFloor2 cmd");
-//         if (elevator.state == STATE_IDLE)
-//         {
-//           userCommand.target = 2;
-//           userCommand.type = moveToFloor;
-//           userCommand.from = FROM_RF;
-//           xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
-//         }
-//       }
-//       else
-//       {
-//         Serial.println("toFloor2 Ignored (Debounce 5s)");
-//       }
-//       break;
-
-//       // case POWER_CUT:
-//       //   Serial.println("received POWER CUT! cmd");
-//       //   strcpy(publish_status.cmd, "POWER_CUT!");
-//       //   digitalWrite(R_POWER_CUT, LOW);
-//       //   xTimerStart(xPowerCutTimer, 0);
-//       //   break;
-
-//     case STOP:
-//       Serial.println("received STOP cmd");
-//       emoDeactivate();
-//       if (elevator.state == STATE_RUNNING)
-//       {
-//         userCommand.target = 0;
-//         userCommand.type = userAbort;
-//         userCommand.from = FROM_RF;
-//         xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
-
-//         lastTimeCmd1 = 0;
-//         lastTimeCmd2 = 0;
-//       }
-//       break;
-//     }
-//     vTaskDelay(pdMS_TO_TICKS(50));
-//   }
-// }
-
 void vRFReceiver(void *pvParams)
 {
-  userCommand_t userCommand; 
+  userCommand_t userCommand;
   static unsigned long lastTimeCmd1 = 0;
   static unsigned long lastTimeCmd2 = 0;
-  const unsigned long DEBOUNCE_DELAY = 3000; 
+  const unsigned long DEBOUNCE_DELAY = 3000;
 
   for (;;)
   {
-    unsigned long cmd = 0; 
+    unsigned long cmd = 0;
     unsigned long now = millis();
 
     if (RF.available())
     {
       cmd = RF.getReceivedValue();
       RF.resetAvailable();
-      
-      if (cmd == 0) {
+
+      if (cmd == 0)
+      {
         vTaskDelay(pdMS_TO_TICKS(50));
-        continue; 
+        continue;
       }
-      
+
       Serial.printf(">> RF Received Code: %lu\n", cmd);
 
       RF_ButtonType pressedBtn = BTN_UNKNOWN;
-      for (int i = 0; i < numRfKeys; i++) {
-        if (rfKeys[i].rfCode == cmd) {
+      for (int i = 0; i < numRfKeys; i++)
+      {
+        if (rfKeys[i].rfCode == cmd)
+        {
           pressedBtn = rfKeys[i].type;
-          break; 
+          break;
         }
       }
 
       switch (pressedBtn)
       {
-        case BTN_TO_FLOOR_1:
-          if (now - lastTimeCmd1 > DEBOUNCE_DELAY)
+      case BTN_TO_FLOOR_1:
+        if (now - lastTimeCmd1 > DEBOUNCE_DELAY)
+        {
+          lastTimeCmd1 = now;
+          Serial.println(">> RF Command: TO FLOOR 1");
+          if (elevator.state == STATE_IDLE)
           {
-            lastTimeCmd1 = now;
-            Serial.println(">> RF Command: TO FLOOR 1");
-            if (elevator.state == STATE_IDLE)
-            {
-              userCommand.target = 1;
-              userCommand.type = moveToFloor;
-              userCommand.from = FROM_RF;
-              xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
-            }
-          }
-          break;
-
-        case BTN_TO_FLOOR_2:
-          if (now - lastTimeCmd2 > DEBOUNCE_DELAY)
-          {
-            lastTimeCmd2 = now;
-            Serial.println(">> RF Command: TO FLOOR 2");
-            if (elevator.state == STATE_IDLE)
-            {
-              userCommand.target = 2;
-              userCommand.type = moveToFloor;
-              userCommand.from = FROM_RF;
-              xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
-            }
-          }
-          break;
-
-        case BTN_STOP:
-          Serial.println(">> RF Command: STOP");
-          emoDeactivate(); 
-          if (elevator.state == STATE_RUNNING)
-          {
-            userCommand.target = 0;
-            userCommand.type = userAbort;
+            userCommand.target = 1;
+            userCommand.type = moveToFloor;
             userCommand.from = FROM_RF;
             xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
-
-            lastTimeCmd1 = 0;
-            lastTimeCmd2 = 0;
           }
-          break;
+        }
+        break;
+
+      case BTN_TO_FLOOR_2:
+        if (now - lastTimeCmd2 > DEBOUNCE_DELAY)
+        {
+          lastTimeCmd2 = now;
+          Serial.println(">> RF Command: TO FLOOR 2");
+          if (elevator.state == STATE_IDLE)
+          {
+            userCommand.target = 2;
+            userCommand.type = moveToFloor;
+            userCommand.from = FROM_RF;
+            xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+          }
+        }
+        break;
+
+      case BTN_STOP:
+        Serial.println(">> RF Command: STOP");
+        emoDeactivate();
+        if (elevator.state == STATE_RUNNING || elevator.state == STATE_PAUSED)
+        {
+          userCommand.target = 0;
+          userCommand.type = userAbort;
+          userCommand.from = FROM_RF;
+          xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+
+          lastTimeCmd1 = 0;
+          lastTimeCmd2 = 0;
+        }
+        break;
 
         // case BTN_EMERGENCY:
         //   Serial.println(">> RF Command: EMERGENCY LOCK");
         //   // xTaskNotify(xOchestratorHandle, EMERG_PRESSED, eSetValueWithOverwrite);
         //   break;
 
-        case BTN_UNKNOWN:
-        default:
-          break;
+      case BTN_UNKNOWN:
+      default:
+        break;
       }
     }
 
@@ -2039,8 +2017,6 @@ void vRFReceiver(void *pvParams)
 }
 
 // timer callbacks
-
-
 
 void vStartRunning(TimerHandle_t xTimer)
 {
@@ -2139,7 +2115,7 @@ void vPollingModbusMaster(void *pvParams)
       case INVERTER_STA:
         if (readDataFrom(INVERTER_ID, 28672, 10, pollingData[INVERTER_ID]))
         {
-          if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
           {
             inverterState.running_hz = pollingData[INVERTER_ID][1];
             inverterState.torque = pollingData[INVERTER_ID][6];
@@ -2255,29 +2231,29 @@ void vPollingModbusMaster(void *pvParams)
         break;
 
       case VSG_STA:
-        // if (readDataFrom(VSG_ID, 0, 1, pollingData[VSG_ID]))
-        // {
-        //   if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
-        //   {
-        //     vsgState.shouldPause = pollingData[VSG_ID][0] & (1 << 0);
-        //     xSemaphoreGive(dataMutex);
-        //   }
-        // }
+        if (readDataFrom(VSG_ID, 0, 1, pollingData[VSG_ID]))
+        {
+          if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+          {
+            vsgState.shouldPause = pollingData[VSG_ID][0] & (1 << 0);
+            xSemaphoreGive(dataMutex);
+          }
+        }
 
-        // if (vsgState.shouldPause != lastVsgState)
-        // {
+        if (vsgState.shouldPause != lastVsgState)
+        {
 
-        //   if (vsgState.shouldPause == true)
-        //   {
-        //     xTaskNotify(xOchestratorHandle, VSG_ALARM, eSetValueWithOverwrite);
-        //   }
-        //   else
-        //   {
-        //     xTaskNotify(xOchestratorHandle, VSG_CLEAR, eSetValueWithOverwrite);
-        //   }
+          if (vsgState.shouldPause == true)
+          {
+            xTaskNotify(xOchestratorHandle, VSG_ALARM, eSetValueWithOverwrite);
+          }
+          else
+          {
+            xTaskNotify(xOchestratorHandle, VSG_CLEAR, eSetValueWithOverwrite);
+          }
 
-        //   lastVsgState = vsgState.shouldPause;
-        // }
+          lastVsgState = vsgState.shouldPause;
+        }
 
         currStation = INVERTER_STA;
         break;
@@ -2296,18 +2272,21 @@ void vESP_NOW(void *pvParams)
   static bool lastVtgState = false;
   static bool lastVsgState = false;
   static bool lastEmergStop = false;
+  static bool lastAim1 = false;
+  static bool lastAim2 = false;
+  static bool lastUserStop = false;
 
   uint8_t stationID;
   uint8_t pollFromStation;
   uint16_t commandFromMaster;
   uint16_t replyToMaster;
-  
+
   bool isConnected_CABIN = false;
   bool isConnected_VSG = false;
 
   modbusStation_t currStation = CABIN_STA;
-
   esp_err_t result;
+  struct_message msg;
 
   for (;;)
   {
@@ -2339,156 +2318,228 @@ void vESP_NOW(void *pvParams)
       // sendData.commandFrame = 0;
       sendData.responseFrame = 0;
       sendData.shouldResponse = true;
-      
-      if(isConnected_CABIN == false){
-      result = esp_now_send(CABIN_MAC, (uint8_t *)&sendData, sizeof(sendData));
+
+      if (isConnected_CABIN == false)
+      {
+        result = esp_now_send(CABIN_MAC, (uint8_t *)&sendData, sizeof(sendData));
       }
       // if (result == ESP_OK)
       // {
       //   // Serial.println("boardcast success!");
       //   recvData.pollFromStation = 0;
       // }
-      currStation = VSG_STA;
+      // currStation = VSG_STA;
       break;
 
-    case VSG_STA:
-      sendData.fromID = MASTER_ID;
-      // sendData.commandFrame = 0;
-      sendData.responseFrame = 0;
-      sendData.shouldResponse = true;
+      // case VSG_STA:
+      //   sendData.fromID = MASTER_ID;
+      //   // sendData.commandFrame = 0;
+      //   sendData.responseFrame = 0;
+      //   sendData.shouldResponse = true;
 
-      result = esp_now_send(VSG_MAC, (uint8_t *)&sendData, sizeof(sendData));
-      // if (result == ESP_OK)
-      // {
-      //   // Serial.println("boardcast success!");
-      // }
-      currStation = CABIN_STA;
-      break;
+      //   if (isConnected_VSG == false)
+      //   {
+      //     result = esp_now_send(VSG_MAC, (uint8_t *)&sendData, sizeof(sendData));
+      //   }
+      //   // if (result == ESP_OK)
+      //   // {
+      //   //   // Serial.println("boardcast success!");
+      //   // }
+      //   currStation = CABIN_STA;
+      //   break;
 
     default:
       break;
     }
 
     /////////////////////////////////////action on bits block////////////////////////////////////
-
-    if (recvData.fromID == 2)
-    { 
-      isConnected_CABIN = true;
-      if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
-      {
-        cabinState.isDoorClosed = recvData.responseFrame & (1 << 0);
-        cabinState.isAim2 = recvData.responseFrame & (1 << 1);
-        cabinState.isAim1 = recvData.responseFrame & (1 << 2);
-        cabinState.isUserStop = recvData.responseFrame & (1 << 3);
-        cabinState.isEmergStop = recvData.responseFrame & (1 << 4);
-        cabinState.isBusy = recvData.responseFrame & (1 << 5);
-        cabinState.vtgAlarm = recvData.responseFrame & (1 << 6);
-        xSemaphoreGive(dataMutex);
-      }
-    }
-
-    if (recvData.fromID == 4)
+    // process each queued packet individually so no rising edge is lost between drain cycles
+    while (xQueueReceive(masterEspNowRxQueue, &msg, 0) == pdPASS)
     {
-      if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+      if (msg.fromID == 2)
       {
-        vsgState.shouldPause = recvData.responseFrame & (1 << 0);
-        xSemaphoreGive(dataMutex);
-      }
-    }
+        isConnected_CABIN = true;
+        bool isFirstCabinPacket = true;
 
-    if (cabinState.isAim2)
-    {
-      Serial.println("received toFloor1 cmd");
-      if (elevator.state == STATE_IDLE)
-      {
-        userCommand_t userCommand; // target, type, from
-        userCommand.target = 2;
-        userCommand.type = moveToFloor;
-        userCommand.from = FROM_CABIN;
-        xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
-      }
-    }
+        bool aim2 = msg.responseFrame & (1 << 1);
+        bool aim1 = msg.responseFrame & (1 << 2);
+        bool userStop = msg.responseFrame & (1 << 3);
+        bool doorClosed = msg.responseFrame & (1 << 0);
+        bool emergStop = msg.responseFrame & (1 << 4);
+        // bool vtgAlarm = msg.responseFrame & (1 << 6);
 
-    if (cabinState.isAim1)
-    {
-      Serial.println("received toFloor1 cmd");
-      if (elevator.state == STATE_IDLE)
-      {
-        userCommand_t userCommand; // target, type, from
-        userCommand.target = 1;
-        userCommand.type = moveToFloor;
-        userCommand.from = FROM_CABIN;
-        xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
-      }
-    }
-
-    if (cabinState.isUserStop)
-    {
-      Serial.println("received STOP cmd");
-      emoDeactivate();
-      if (elevator.state == STATE_RUNNING)
-      {
-        userCommand_t userCommand; // target, type, from
-        userCommand.target = 0;
-        userCommand.type = userAbort;
-        userCommand.from = FROM_CABIN;
-        xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
-      }
-    }
-
-    if (cabinState.isDoorClosed != lastDoorState)
-    {
-
-      if (cabinState.isDoorClosed == false)
-      {
-
-        xTaskNotify(xOchestratorHandle, DOOR_IS_CLOSED, eSetValueWithOverwrite);
-      }
-      else
-      {
-        if (elevator.state != STATE_EMERGENCY)
+        isConnected_CABIN = true;
+        bool doorClosed = msg.responseFrame & (1 << 0);
+        if (isFirstCabinPacket)
         {
-          xTaskNotify(xOchestratorHandle, DOOR_IS_OPEN, eSetValueWithOverwrite);
+          if (xIdleLightTimer != NULL)
+          {
+            xTimerReset(xIdleLightTimer, 0);
+          }
+          isFirstCabinPacket = false;
+        }
+
+        // update cabinState under mutex
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+        {
+          cabinState.isDoorClosed = doorClosed;
+          cabinState.isAim2 = aim2;
+          cabinState.isAim1 = aim1;
+          cabinState.isUserStop = userStop;
+          cabinState.isEmergStop = emergStop;
+          cabinState.isBusy = msg.responseFrame & (1 << 5);
+          // cabinState.vtgAlarm = vtgAlarm;
+          xSemaphoreGive(dataMutex);
+        }
+
+        // edge-triggered commands — detected per packet, not after full drain
+        if (aim2 && !lastAim2)
+        {
+          Serial.println("received toFloor2 cmd");
+          if (elevator.state == STATE_IDLE)
+          {
+            userCommand_t userCommand;
+            userCommand.target = 2;
+            userCommand.type = moveToFloor;
+            userCommand.from = FROM_CABIN;
+            xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+          }
+        }
+        lastAim2 = aim2;
+
+        if (aim1 && !lastAim1)
+        {
+          Serial.println("received toFloor1 cmd");
+          if (elevator.state == STATE_IDLE)
+          {
+            userCommand_t userCommand;
+            userCommand.target = 1;
+            userCommand.type = moveToFloor;
+            userCommand.from = FROM_CABIN;
+            xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+          }
+        }
+        lastAim1 = aim1;
+
+        if (userStop && !lastUserStop)
+        {
+          Serial.println("received STOP cmd");
+          emoDeactivate();
+          if (elevator.state == STATE_RUNNING)
+          {
+            userCommand_t userCommand;
+            userCommand.target = 0;
+            userCommand.type = userAbort;
+            userCommand.from = FROM_CABIN;
+            xQueueSend(xQueueCommand, &userCommand, (TickType_t)0);
+          }
+        }
+        lastUserStop = userStop;
+
+        if (doorClosed == true)
+        {
+          xEventGroupSetBits(xRunningEventGroup, DOOR_OPEN_BIT);
+        }
+        else
+        {
+          xEventGroupClearBits(xRunningEventGroup, DOOR_OPEN_BIT);
+        }
+
+        if (doorClosed != lastDoorState)
+        {
+          //--------------------turn on light after doorState is changed------------------------
+          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+          {
+            writeBit(cabinState.writtenFrame[1], 5, true); 
+            cabinState.shouldWrite = true;                 
+            xSemaphoreGive(dataMutex);
+          }
+          if (xIdleLightTimer != NULL)
+          {
+            xTimerReset(xIdleLightTimer, 0); 
+          }
+          //-------------------------------------------------------------------------------------
+          
+          if (doorClosed == true) // door is open
+          {
+            xTaskNotify(xOchestratorHandle, DOOR_IS_OPEN, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+          }
+          else // door IS closed
+          {
+            if (elevator.state != STATE_EMERGENCY)
+            {
+              xTaskNotify(xOchestratorHandle, DOOR_IS_CLOSED, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+            }
+          }
+          lastDoorState = doorClosed;
+        }
+
+        if (emergStop != lastEmergStop)
+        {
+          if (emergStop == true)
+          {
+            xTaskNotify(xOchestratorHandle, EMERG_PRESSED, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+          }
+          lastEmergStop = emergStop;
+        }
+
+        // if (vtgAlarm != lastVtgState)
+        // {
+        //   if (vtgAlarm == true && elevator.state != STATE_EMERGENCY)
+        //   {
+        //     // xTaskNotify(xOchestratorHandle, VTG_ALARM, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+        //   }
+        //   else
+        //   {
+        //     // xTaskNotify(xOchestratorHandle, VTG_CLEAR, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+        //   }
+        //   lastVtgState = vtgAlarm;
+        // }
+      }
+
+      if (msg.fromID == 4)
+      {
+        isConnected_VSG = true;
+        bool vsgPause = msg.responseFrame & (1 << 0);
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+        {
+          vsgState.shouldPause = vsgPause;
+          xSemaphoreGive(dataMutex);
+        }
+
+        if (vsgPause != lastVsgState)
+        {
+          if (vsgPause == true)
+          {
+            xTaskNotify(xOchestratorHandle, VSG_ALARM, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+          }
+          else
+          {
+            xTaskNotify(xOchestratorHandle, VSG_CLEAR, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+          }
+          lastVsgState = vsgPause;
         }
       }
-      lastDoorState = cabinState.isDoorClosed;
-    }
 
-    if (cabinState.isEmergStop != lastEmergStop)
-    {
-      if (cabinState.isEmergStop == true)
+      if (msg.fromID == 5)
       {
-        xTaskNotify(xOchestratorHandle, EMERG_PRESSED, eSetValueWithOverwrite);
+        bool vtgAlarm = msg.responseFrame & (1 << 0);
+        if (vtgAlarm != lastVtgState)
+        {
+          if (vtgAlarm == true && elevator.state != STATE_EMERGENCY)
+          {
+            if (elevator.dir == DIR_UP)
+            {
+              xTaskNotify(xOchestratorHandle, VTG_ALARM, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+            }
+          }
+          else
+          {
+            xTaskNotify(xOchestratorHandle, VTG_CLEAR, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+          }
+          lastVtgState = vtgAlarm;
+        }
       }
-      lastEmergStop = cabinState.isEmergStop;
-    }
-
-    if (cabinState.vtgAlarm != lastVtgState)
-    {
-      if (cabinState.vtgAlarm == true && elevator.state != STATE_EMERGENCY)
-      {
-        xTaskNotify(xOchestratorHandle, VTG_ALARM, eSetValueWithOverwrite);
-      }
-      else
-      {
-        xTaskNotify(xOchestratorHandle, VTG_CLEAR, eSetValueWithOverwrite);
-      }
-      lastVtgState = cabinState.vtgAlarm;
-    }
-
-    if (vsgState.shouldPause != lastVsgState)
-    {
-
-      if (vsgState.shouldPause == true)
-      {
-        xTaskNotify(xOchestratorHandle, VSG_ALARM, eSetValueWithOverwrite);
-      }
-      else
-      {
-        xTaskNotify(xOchestratorHandle, VSG_CLEAR, eSetValueWithOverwrite);
-      }
-
-      lastVsgState = vsgState.shouldPause;
     }
 
     vTaskDelay(pdMS_TO_TICKS(modbusDelayTime));
@@ -2498,7 +2549,7 @@ void vESP_NOW(void *pvParams)
 void vPollingFloorSensor1(void *pvParams) // first floor sensor
 {
   uint8_t floorSensor1_counter = 0;
-  const uint8_t STABLE_THRESHOLD = 20;
+  const uint8_t STABLE_THRESHOLD = 10;
   bool hasNotified = false;
 
   for (;;)
@@ -2529,7 +2580,7 @@ void vPollingFloorSensor1(void *pvParams) // first floor sensor
 void vPollingFloorSensor2(void *pvParams) // first floor sensor
 {
   uint8_t floorSensor2_counter = 0;
-  const uint8_t STABLE_THRESHOLD = 20;
+  const uint8_t STABLE_THRESHOLD = 10;
   bool hasNotified = false;
 
   for (;;)
@@ -2560,7 +2611,7 @@ void vPollingFloorSensor2(void *pvParams) // first floor sensor
 void vPollingNoPower(void *pvParams)
 {
   uint8_t stable_counter = 0;
-  const uint8_t THRESHOLD = 20;
+  const uint8_t THRESHOLD = 10;
   bool lastIsNoPower = false;
 
   for (;;)
@@ -2584,14 +2635,14 @@ void vPollingNoPower(void *pvParams)
     if (currentIsNoPower && !lastIsNoPower)
     {
       Serial.println(">> Event: Power LOST!");
-      xTaskNotify(xOchestratorHandle, NO_POWER, eSetValueWithOverwrite);
+      // xTaskNotify(xOchestratorHandle, NO_POWER, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
       lastIsNoPower = true;
     }
 
     else if (currentIsPowerOK && lastIsNoPower)
     {
       Serial.println(">> Event: Power RESTORED!");
-      xTaskNotify(xOchestratorHandle, POWER_RESTORED, eSetValueWithOverwrite);
+      // xTaskNotify(xOchestratorHandle, POWER_RESTORED, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
       lastIsNoPower = false;
     }
 
@@ -2602,12 +2653,12 @@ void vPollingNoPower(void *pvParams)
 void vPollingSafetySling(void *pvParams)
 {
   uint8_t safetySling_counter = 0;
-  const uint8_t STABLE_THRESHOLD = 20;
+  const uint8_t STABLE_THRESHOLD = 10;
   bool hasNotified = false;
 
   for (;;)
   {
-    bool raw_safetySling = (digitalRead(safetySling) == LOW);
+    bool raw_safetySling = (digitalRead(safetySling) == HIGH);
     if (raw_safetySling)
     {
       if (safetySling_counter < STABLE_THRESHOLD)
@@ -2623,7 +2674,7 @@ void vPollingSafetySling(void *pvParams)
 
     if (isSafetyActive == true && hasNotified == false)
     {
-      xTaskNotify(xOchestratorHandle, SAFETY_BRAKE, eSetValueWithOverwrite);
+      xTaskNotify(xOchestratorHandle, SAFETY_BRAKE, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
       hasNotified = true;
     }
     vTaskDelay(pdMS_TO_TICKS(20));
@@ -2666,7 +2717,7 @@ void vPollingSpeedGovernor(void *pvParams)
         {
           overSpeed_counter = 0;
           Serial.println(">> OVERSPEED DETECTED (via Polling) !!!");
-          xTaskNotify(xOchestratorHandle, OVERSPEED, eSetValueWithOverwrite);
+          xTaskNotify(xOchestratorHandle, OVERSPEED, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
         }
       }
     }
@@ -2773,7 +2824,7 @@ void vReconnectTask(void *pvParams)
 
 void vPublishTask(void *pvParams)
 {
-  char jsonBuf[512];
+  char jsonBuf[1024];
 
   status_t lastPubState;
   memset(&lastPubState, 0, sizeof(status_t));
@@ -2784,7 +2835,12 @@ void vPublishTask(void *pvParams)
   for (;;)
   {
     status_t currState;
-    uint16_t hz = 0, tq = 0, di = 0;
+    uint32_t hz = 0, tq = 0;
+    uint16_t di = 0;
+    bool cabinDoor = false, cabinAim1 = false, cabinAim2 = false;
+    bool cabinStop = false, cabinEmerg = false, cabinBusy = false, cabinVtg = false;
+    bool vsgPause = false;
+    bool vsgAlarm[5] = {false};
 
     if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
@@ -2792,6 +2848,16 @@ void vPublishTask(void *pvParams)
       hz = inverterState.running_hz;
       tq = inverterState.torque;
       di = inverterState.digitalInput;
+      cabinDoor = cabinState.isDoorClosed;
+      cabinAim1 = cabinState.isAim1;
+      cabinAim2 = cabinState.isAim2;
+      cabinStop = cabinState.isUserStop;
+      cabinEmerg = cabinState.isEmergStop;
+      cabinBusy = cabinState.isBusy;
+      cabinVtg = cabinState.vtgAlarm;
+      vsgPause = vsgState.shouldPause;
+      for (int i = 0; i < 5; i++)
+        vsgAlarm[i] = vsgState.isAlarm[i];
       xSemaphoreGive(dataMutex);
     }
     else
@@ -2799,6 +2865,8 @@ void vPublishTask(void *pvParams)
       vTaskDelay(pdMS_TO_TICKS(50));
       continue;
     }
+
+    EventBits_t evtBits = xEventGroupGetBits(xRunningEventGroup);
 
     bool stateChanged = false;
     if (currState.pos != lastPubState.pos ||
@@ -2818,25 +2886,40 @@ void vPublishTask(void *pvParams)
 
       snprintf(jsonBuf, sizeof(jsonBuf),
                "{"
-               "\"floorValue\":%d,"
-               "\"state\":%d,"
-               "\"dir\":%d,"
-               "\"targetFloor\":%d,"
-               "\"isBrake\":%s,"
-               "\"btwFloor\":%s,"
-               "\"emo\":%s,"
-               "\"inv_hz\":%d,"
-               "\"inv_tq\":%d,"
-               "\"inv_di\":%d"
+               "\"pos\":%d,\"state\":%d,\"dir\":%d,\"lastDir\":%d,"
+               "\"target\":%d,\"lastTarget\":%d,"
+               "\"isBrake\":%s,\"btwFloor\":%s,"
+               "\"inv_hz\":%lu,\"inv_tq\":%lu,\"inv_di\":%d,"
+               "\"cabin_door\":%s,\"cabin_aim1\":%s,\"cabin_aim2\":%s,"
+               "\"cabin_stop\":%s,\"cabin_emerg\":%s,\"cabin_busy\":%s,\"cabin_vtg\":%s,"
+               "\"vsg_pause\":%s,\"vsg_alarm\":\"%d%d%d%d%d\","
+               "\"pin_rup\":%s,\"pin_rdw\":%s,\"pin_brk\":%s,\"pin_pcut\":%s,"
+               "\"pin_nopwr\":%s,\"pin_sling\":%s,\"pin_spd\":%s,\"pin_emo\":%s,"
+               "\"evtBits\":%d"
                "}",
-               currState.pos,
-               currState.state,
-               currState.dir,
-               currState.target,
+               currState.pos, (int)currState.state, (int)currState.dir, (int)currState.lastDir,
+               currState.target, currState.lastTarget,
                currState.isBrake ? "true" : "false",
                currState.btwFloor ? "true" : "false",
-               (digitalRead(EMO) == HIGH) ? "true" : "false",
-               hz, tq, di);
+               hz, tq, di,
+               cabinDoor ? "true" : "false",
+               cabinAim1 ? "true" : "false",
+               cabinAim2 ? "true" : "false",
+               cabinStop ? "true" : "false",
+               cabinEmerg ? "true" : "false",
+               cabinBusy ? "true" : "false",
+               cabinVtg ? "true" : "false",
+               vsgPause ? "true" : "false",
+               vsgAlarm[0], vsgAlarm[1], vsgAlarm[2], vsgAlarm[3], vsgAlarm[4],
+               digitalRead(R_UP) == HIGH ? "true" : "false",
+               digitalRead(R_DW) == HIGH ? "true" : "false",
+               digitalRead(BRK) == HIGH ? "true" : "false",
+               digitalRead(R_POWER_CUT) == HIGH ? "true" : "false",
+               digitalRead(NoPower) == HIGH ? "true" : "false",
+               digitalRead(safetySling) == HIGH ? "true" : "false",
+               digitalRead(speedGovernor) == HIGH ? "true" : "false",
+               digitalRead(EMO) == HIGH ? "true" : "false",
+               (int)evtBits);
 
       if (xSemaphoreTake(mqttMutex, portMAX_DELAY) == pdTRUE)
       {
@@ -2859,6 +2942,7 @@ void vStatusLogger(void *pvParams)
 {
   int lastPOS = 0;
   bool lastBtw = false;
+  state_t lastState = STATE_IDLE;
 
   for (;;)
   {
@@ -2928,10 +3012,22 @@ void vUpdatePage(void *pvParams)
   }
 }
 
+void vIdleLightCallback(TimerHandle_t xTimer)
+{
+  Serial.println(">> Idle Timer Expired: Turning OFF cabin light.");
+  if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+  {
+    writeBit(cabinState.writtenFrame[1], 5, false);
+    enableTransmit(cabinState.shouldWrite);
+    xSemaphoreGive(dataMutex);
+  }
+}
+
 void setup()
 {
   Serial.begin(115200);
   Serial1.begin(38400, SERIAL_8E1, PIN_RX, PIN_TX);
+  masterEspNowRxQueue = xQueueCreate(20, sizeof(struct_message));
 
   while (!Serial)
     ;
@@ -2967,6 +3063,7 @@ void setup()
   }
 
   MDNS.begin("ximplex_websocket");
+  // MDNS.begin("ximplex_websocket_2");
 
   server.reset(); // try putting this in setup
   configureserver();
@@ -3011,6 +3108,15 @@ void setup()
   if (esp_now_add_peer(&peerVsg) != ESP_OK)
   {
     Serial.println("Failed to add VSG peer");
+  }
+
+  esp_now_peer_info_t peerVtg = {};
+  memcpy(peerVtg.peer_addr, VTG_MAC, 6);
+  peerVtg.channel = 0;
+  peerVtg.encrypt = false;
+  if (esp_now_add_peer(&peerVtg) != ESP_OK)
+  {
+    Serial.println("Failed to add VTG peer");
   }
 
   pinMode(WIFI_READY, OUTPUT);
@@ -3067,6 +3173,7 @@ void setup()
   // xQueueGetDirection = xQueueCreate(1, sizeof(uint8_t));
 
   xStartRunningTimer = xTimerCreate("startRunning", WAIT_TO_RUNNING_MS, pdFALSE, NULL, vStartRunning);
+  xIdleLightTimer = xTimerCreate("idleLight", pdMS_TO_TICKS(IDLE_LIGHT_TIMEOUT_MS), pdFALSE, NULL, vIdleLightCallback);
 
   xTaskCreate(vOchestrator, "Ochestrator", 4096, NULL, 5, &xOchestratorHandle);
 
@@ -3108,6 +3215,11 @@ void setup()
   Serial.println(WiFi.channel());
   Serial.print("My MAC is: ");
   Serial.println(WiFi.macAddress());
+
+  if (xIdleLightTimer != NULL)
+  {
+    xTimerStart(xIdleLightTimer, 0);
+  }
 }
 
 void loop()
@@ -3145,10 +3257,10 @@ void loop()
     // //   Serial.printf("Uptime: %lu ms | Heap: %u bytes\n", millis(), ESP.getFreeHeap());
 
     //   // --- BLOCK 2: Elevator Logic State ---
-    Serial.println(">> [LOGIC STATE]");
+    // Serial.println(">> [LOGIC STATE]");
     Serial.printf("  State: %d (%d)\n", dbg_elevator.state, dbg_elevator.state);
     Serial.printf("  Pos: %d | Target: %d | LastTarget: %d\n", elevator.pos, elevator.target, dbg_elevator.lastTarget);
-    Serial.printf("  Dir: %d | Brake Logic: %s\n", dbg_elevator.dir, dbg_elevator.isBrake ? "LOCKED" : "RELEASED");
+    // Serial.printf("  Dir: %d | Brake Logic: %s\n", dbg_elevator.dir, dbg_elevator.isBrake ? "LOCKED" : "RELEASED");
     Serial.print("btwFloor: ");
     Serial.println(elevator.btwFloor);
     // //   // --- BLOCK 3: Hardware I/O  ---
@@ -3158,21 +3270,21 @@ void loop()
     // //   Serial.printf("  Relays: UP=%d, DW=%d, BRK=%d, EMO=%d\n", digitalRead(R_UP), digitalRead(R_DW), digitalRead(BRK), digitalRead(EMO));
 
     // --- BLOCK 4: Modbus Data (Slave Status) ---
-    Serial.println(">> [MODBUS DATA]");
-    Serial.printf("  [INV] Hz: %d | Torque: %d | DI: %d\n", dbg_inverter.running_hz, dbg_inverter.torque, dbg_inverter.digitalInput);
-    Serial.printf("  [CABIN] DoorClosed: %d | Emerg: %d | Busy: %d\n", dbg_cabin.isDoorClosed, dbg_cabin.isEmergStop, dbg_cabin.isBusy);
-    Serial.printf("  [VSG] PauseReq: %d | Alarm[0]: %d\n", dbg_vsg.shouldPause, dbg_vsg.isAlarm[0]);
+    // Serial.println(">> [MODBUS DATA]");
+    // Serial.printf("  [INV] Hz: %d | Torque: %d | DI: %d\n", dbg_inverter.running_hz, dbg_inverter.torque, dbg_inverter.digitalInput);
+    // Serial.printf("  [CABIN] DoorClosed: %d | Emerg: %d | Busy: %d\n", dbg_cabin.isDoorClosed, dbg_cabin.isEmergStop, dbg_cabin.isBusy);
+    // Serial.printf("  [VSG] PauseReq: %d | Alarm[0]: %d\n", dbg_vsg.shouldPause, dbg_vsg.isAlarm[0]);
 
     // // //   // --- BLOCK 5: Event Flags (Safety Blocks) ---
-    Serial.println(">> [SAFETY FLAGS]");
+    // Serial.println(">> [SAFETY FLAGS]");
     Serial.printf("  Raw Bits: 0x%06X\n", dbg_events);
-    Serial.printf("  - Door Open: %d\n", (dbg_events & DOOR_OPEN_BIT) ? 1 : 0);
-    Serial.printf("  - Modbus Dis: %d\n", (dbg_events & MODBUS_DIS_BIT) ? 1 : 0);
-    Serial.printf("  - Emergency: %d\n", (dbg_events & EMERG_BIT) ? 1 : 0);
+    // Serial.printf("  - Door Open: %d\n", (dbg_events & DOOR_OPEN_BIT) ? 1 : 0);
+    // Serial.printf("  - Modbus Dis: %d\n", (dbg_events & MODBUS_DIS_BIT) ? 1 : 0);
+    // Serial.printf("  - Emergency: %d\n", (dbg_events & EMERG_BIT) ? 1 : 0);
 
-    Serial.println(digitalRead(27));
-    Serial.println(digitalRead(14));
-    Serial.println(overSpeed_counter);
-    Serial.println("---------------------------");
+    // Serial.println(digitalRead(27));
+    // Serial.println(digitalRead(14));
+    // Serial.println(overSpeed_counter);
+    // Serial.println("---------------------------");
   }
 }

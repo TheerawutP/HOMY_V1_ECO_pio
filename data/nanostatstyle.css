@@ -1,5 +1,7 @@
 /* @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap'); */
-@import url('https://fonts.googleapis.com/css2?family=Forum&family=Italiana&family=Julius+Sans+One&family=Poiret+One&display=swap');body {
+@import url('https://fonts.googleapis.com/css2?family=Forum&family=Italiana&family=Julius+Sans+One&family=Poiret+One&display=swap');
+
+body {
   background-color: hsl(216, 99%, 90%);
 }
 
@@ -164,7 +166,10 @@ body {
   margin: 0;
   padding: 0;
   /* บังคับไม่ให้มี Scrollbar */
-  overflow: hidden;
+  /* overflow: hidden; */
+  overflow-y: auto;
+  /* ลบ overflow: hidden; ทิ้งไปเลย */
+  min-height: 100vh;
 }
 
 /* .main-container {
@@ -178,17 +183,18 @@ body {
   min-height: 100vh;
   width: 100%;
 } */
- 
+
 .main-container {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  
+
   /* 🌟 ใช้ dvh แทน vh เพื่อให้คำนวณความสูงหักลบแถบเบราว์เซอร์มือถือออกไป */
-  height: 100dvh; 
+  height: 100dvh;
   width: 100%;
-  padding-bottom: 20px; /* เว้นระยะด้านล่างนิดนึงไม่ให้ปุ่มชิดขอบเกินไป */
+  padding-bottom: 20px;
+  /* เว้นระยะด้านล่างนิดนึงไม่ให้ปุ่มชิดขอบเกินไป */
 }
 
 /* Container แนวตั้ง */
@@ -317,24 +323,25 @@ body {
 }
 
 .brand-subname {
-    font-family: 'Forum', serif; 
-    
-    font-size: 2rem;
-    font-weight: 200; /* 🌟 ใช้เลข 300 เส้นจะบางเฉียบ ดูหรูมาก */
-    color: #ffffff;
-    margin-top: -5px; 
-    
-    letter-spacing: 10px; 
-    text-transform: uppercase; 
-    
-    text-shadow: 0 0 15px rgba(255, 255, 255, 0.4);
+  font-family: 'Forum', serif;
+
+  font-size: 2rem;
+  font-weight: 200;
+  /* 🌟 ใช้เลข 300 เส้นจะบางเฉียบ ดูหรูมาก */
+  color: #ffffff;
+  margin-top: -5px;
+
+  letter-spacing: 10px;
+  text-transform: uppercase;
+
+  text-shadow: 0 0 15px rgba(255, 255, 255, 0.4);
 }
 
 
 
 .emerg-active {
   /* ทำให้พื้นหลังปุ่มเป็นสีเหลืองอำพันจางๆ */
-  background: rgba(255, 191, 0, 0.3) !important; 
+  background: rgba(255, 191, 0, 0.3) !important;
   /* เปลี่ยนสีกรอบ */
   border-color: #FFBF00 !important;
   /* เรียกใช้แอนิเมชันกระพริบ */
@@ -349,19 +356,24 @@ body {
 
 /* แอนิเมชันกระพริบแสง */
 @keyframes emergBlink {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 0 15px rgba(255, 191, 0, 0.5);
     transform: scale(1);
   }
+
   50% {
-    box-shadow: 0 0 40px rgba(255, 191, 0, 1); /* แสงฟุ้งกระจายแรงสุด */
-    transform: scale(1.05); /* เด้งขยายใหญ่ขึ้นนิดนึง */
+    box-shadow: 0 0 40px rgba(255, 191, 0, 1);
+    /* แสงฟุ้งกระจายแรงสุด */
+    transform: scale(1.05);
+    /* เด้งขยายใหญ่ขึ้นนิดนึง */
   }
 }
 
 .emg-msg-container {
   /* จองพื้นที่ความสูงไว้เลย ปุ่มจะได้ไม่ขยับตอนข้อความโผล่ */
-  height: 40px; 
+  height: 40px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -377,7 +389,7 @@ body {
   text-align: center;
   line-height: 1.2;
   letter-spacing: 1px;
-  
+
   /* ซ่อนไว้เป็นค่าเริ่มต้น */
   visibility: hidden;
   opacity: 0;
@@ -387,7 +399,8 @@ body {
 .emg-text .emg-sub {
   font-size: 11px;
   font-weight: 400;
-  color: #FFE699; /* เปลี่ยนเป็นสีเหลืองพาสเทลอ่อนๆ ให้เข้าโทน */
+  color: #FFE699;
+  /* เปลี่ยนเป็นสีเหลืองพาสเทลอ่อนๆ ให้เข้าโทน */
   letter-spacing: 0.5px;
 }
 
@@ -399,14 +412,17 @@ body {
 
 /* อนิเมชันตัวหนังสือเรืองแสง */
 @keyframes textAmberGlow {
-  0%, 100% { 
-    opacity: 0.6; 
-    text-shadow: 0 0 5px rgba(255, 191, 0, 0.5); 
+
+  0%,
+  100% {
+    opacity: 0.6;
+    text-shadow: 0 0 5px rgba(255, 191, 0, 0.5);
   }
-  50% { 
-    opacity: 1; 
+
+  50% {
+    opacity: 1;
     /* แสงฟุ้ง + แกนกลางสีขาวนิดๆ ให้ดูสว่างจ้า */
-    text-shadow: 0 0 15px rgba(255, 191, 0, 1), 0 0 5px rgba(255, 255, 255, 0.8); 
+    text-shadow: 0 0 15px rgba(255, 191, 0, 1), 0 0 5px rgba(255, 255, 255, 0.8);
   }
 }
 
@@ -415,52 +431,78 @@ body {
 
 
 #toast-container {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 /* หน้าตาของ Pop-up */
 .toast-msg {
-    background: rgba(30, 30, 45, 0.95);
-    backdrop-filter: blur(10px);
-    color: #fff;
-    padding: 15px 25px;
-    border-radius: 8px;
-    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-    font-family: 'Inter', sans-serif;
-    min-width: 250px;
-    transform: translateX(120%); /* ซ่อนไว้ทางขวาก่อน */
-    animation: slideInRight 0.3s forwards, fadeOutRight 0.5s 4.5s forwards;
-    border-left: 5px solid #00c0ff; /* สีขอบเริ่มต้น */
+  background: rgba(30, 30, 45, 0.95);
+  backdrop-filter: blur(10px);
+  color: #fff;
+  padding: 15px 25px;
+  border-radius: 8px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+  font-family: 'Inter', sans-serif;
+  min-width: 250px;
+  transform: translateX(120%);
+  /* ซ่อนไว้ทางขวาก่อน */
+  animation: slideInRight 0.3s forwards, fadeOutRight 0.5s 4.5s forwards;
+  border-left: 5px solid #00c0ff;
+  /* สีขอบเริ่มต้น */
 }
 
 /* หัวข้อ (DANGER, WARNING, INFO) */
 .toast-msg strong {
-    display: block;
-    font-size: 12px;
-    letter-spacing: 1px;
-    margin-bottom: 5px;
+  display: block;
+  font-size: 12px;
+  letter-spacing: 1px;
+  margin-bottom: 5px;
 }
 
 /* แบ่งสีตามประเภท */
-.toast-msg.danger { border-left-color: #ff3333; color: #ffcccc; }
-.toast-msg.danger strong { color: #ff3333; }
+.toast-msg.danger {
+  border-left-color: #ff3333;
+  color: #ffcccc;
+}
 
-.toast-msg.warning { border-left-color: #FFBF00; color: #fff0cc; }
-.toast-msg.warning strong { color: #FFBF00; }
+.toast-msg.danger strong {
+  color: #ff3333;
+}
 
-.toast-msg.info { border-left-color: #00e676; color: #ccffcc; }
-.toast-msg.info strong { color: #00e676; }
+.toast-msg.warning {
+  border-left-color: #FFBF00;
+  color: #fff0cc;
+}
+
+.toast-msg.warning strong {
+  color: #FFBF00;
+}
+
+.toast-msg.info {
+  border-left-color: #00e676;
+  color: #ccffcc;
+}
+
+.toast-msg.info strong {
+  color: #00e676;
+}
 
 /* แอนิเมชันเข้าและออก */
 @keyframes slideInRight {
-    to { transform: translateX(0); }
+  to {
+    transform: translateX(0);
+  }
 }
+
 @keyframes fadeOutRight {
-    to { opacity: 0; transform: translateX(120%); }
+  to {
+    opacity: 0;
+    transform: translateX(120%);
+  }
 }
