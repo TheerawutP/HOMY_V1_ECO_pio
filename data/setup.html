@@ -89,7 +89,7 @@
   <!-- <div class="container mybox2"> -->
   <div class="container">
 
-    <form action="/actionpage.html" method="POST"">
+    <form action="/actionpage.html" method="POST">
 
       <!-- <div class=" form-box ms-5 ms-md-0-button">
 
@@ -175,11 +175,33 @@
             </div>
           </div>
 
+          <div class="div mybox7 ps-1 pt-1 text-white ">
+            <h6>Station MAC Addresses</h6>
+          </div>
 
+          <div class="div mybox2">
+            <div class="form-box ms-5 ms-md-0">
+              <label class="form-label mb-0">CABIN_MAC</label>
+              <input type="text" class="form-control p-0 border border-secondary" name="cabin_mac"
+                id="cabin_mac_id" placeholder="F8:B3:B7:4F:18:F4">
+            </div>
+          </div>
 
+          <div class="div mybox2">
+            <div class="form-box ms-5 ms-md-0">
+              <label class="form-label mb-0">VSG_MAC</label>
+              <input type="text" class="form-control p-0 border border-secondary" name="vsg_mac"
+                id="vsg_mac_id" placeholder="EC:E3:34:1A:73:3C">
+            </div>
+          </div>
 
-
-
+          <div class="div mybox2">
+            <div class="form-box ms-5 ms-md-0">
+              <label class="form-label mb-0">VTG_MAC</label>
+              <input type="text" class="form-control p-0 border border-secondary" name="vtg_mac"
+                id="vtg_mac_id" placeholder="1C:C3:AB:F9:A4:38">
+            </div>
+          </div>
 
           <div class="row">
 
@@ -189,6 +211,10 @@
             </div>
             <div class="col text-center ">
               <button type="submit" class="btn btn-primary my-2">Submit</button>
+            </div>
+
+            <div class="col text-center ">
+              <button type="button" class="btn btn-primary my-2" onclick="sendStationMacs()">Update MACs</button>
             </div>
 
           </div>
@@ -211,4 +237,56 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/js/bootstrap.bundle.min.js"
     integrity="sha384-JEW9xMcG8R+pH31jmWH6WWP0WintQrMb4s7ZOdauHnUtxwoG2vI5DkLtS3qm9Ekf"
     crossorigin="anonymous"></script>
+
+  <script>
+    var stationWs = null;
+    var pendingMacUpdate = null;
+
+    function ensureStationWs() {
+      if (stationWs && stationWs.readyState === 1) return; // OPEN
+      if (stationWs && (stationWs.readyState === 0 || stationWs.readyState === 2)) return; // CONNECTING / CLOSING
+
+      var wsUrl = "ws://" + window.location.hostname + ":81/";
+      stationWs = new WebSocket(wsUrl);
+
+      stationWs.onopen = function () {
+        if (pendingMacUpdate) {
+          stationWs.send(pendingMacUpdate);
+          pendingMacUpdate = null;
+        }
+      };
+
+      stationWs.onmessage = function (evt) {
+        try {
+          if (typeof evt.data === "string") {
+            var obj = JSON.parse(evt.data);
+            if (obj && obj.alert) {
+              alert(obj.msg || obj.alert);
+            }
+          }
+        } catch (e) {
+          // ignore non-json
+        }
+      };
+    }
+
+    function sendStationMacs() {
+      var cabin = document.getElementById("cabin_mac_id")?.value?.trim() || "";
+      var vsg = document.getElementById("vsg_mac_id")?.value?.trim() || "";
+      var vtg = document.getElementById("vtg_mac_id")?.value?.trim() || "";
+
+      if (!cabin || !vsg || !vtg) {
+        alert("Please fill cabin_mac, vsg_mac, and vtg_mac before updating.");
+        return;
+      }
+
+      pendingMacUpdate = JSON.stringify({
+        cabin_mac: cabin,
+        vsg_mac: vsg,
+        vtg_mac: vtg
+      });
+      ensureStationWs();
+      alert("Sending MAC update over websocket...");
+    }
+  </script>
 </body>

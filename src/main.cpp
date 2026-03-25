@@ -257,6 +257,109 @@ uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 uint8_t CABIN_MAC[6] = {0xF8, 0xB3, 0xB7, 0x4F, 0x18, 0xF4};
 uint8_t VSG_MAC[6] = {0xEC, 0xE3, 0x34, 0x1A, 0x73, 0x3C};
 uint8_t VTG_MAC[6] = {0x1C, 0xC3, 0xAB, 0xF9, 0xA4, 0x38};
+
+// ESP-NOW peer MAC persistence (editable via websocket)
+static const char *PREF_NS_ESP_NOW_MAC = "espnow-mac";
+static const char *PREF_KEY_CABIN_MAC = "cabin_mac";
+static const char *PREF_KEY_VSG_MAC = "vsg_mac";
+static const char *PREF_KEY_VTG_MAC = "vtg_mac";
+
+static String macToString(const uint8_t mac[6])
+{
+  char buf[18];
+  snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  return String(buf);
+}
+
+static bool parseMacString(const String &macStr, uint8_t out[6])
+{
+  String s = macStr;
+  s.trim();
+  if (s.length() == 0)
+    return false;
+
+  unsigned int b[6] = {0};
+
+  // Support formats:
+  // - "AA:BB:CC:DD:EE:FF"
+  // - "AA-BB-CC-DD-EE-FF"
+  // - "AABBCCDDEEFF"
+  s.replace('-', ':');
+  s.replace('.', ':');
+
+  int matched = sscanf(s.c_str(), "%x:%x:%x:%x:%x:%x",
+                        &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]);
+  if (matched == 6)
+  {
+    for (int i = 0; i < 6; i++)
+      out[i] = (uint8_t)b[i];
+    return true;
+  }
+
+  matched = sscanf(s.c_str(), "%02x%02x%02x%02x%02x%02x",
+                   &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]);
+  if (matched == 6)
+  {
+    for (int i = 0; i < 6; i++)
+      out[i] = (uint8_t)b[i];
+    return true;
+  }
+
+  return false;
+}
+
+static void loadStationMacsFromPreferences()
+{
+  preferences.begin(PREF_NS_ESP_NOW_MAC, true);
+
+  String cabinMacStr = preferences.getString(PREF_KEY_CABIN_MAC, "");
+  String vsgMacStr = preferences.getString(PREF_KEY_VSG_MAC, "");
+  String vtgMacStr = preferences.getString(PREF_KEY_VTG_MAC, "");
+
+  uint8_t tmp[6];
+
+  if (parseMacString(cabinMacStr, tmp))
+    memcpy(CABIN_MAC, tmp, 6);
+  if (parseMacString(vsgMacStr, tmp))
+    memcpy(VSG_MAC, tmp, 6);
+  if (parseMacString(vtgMacStr, tmp))
+    memcpy(VTG_MAC, tmp, 6);
+
+  preferences.end();
+}
+
+static void saveStationMacsToPreferences()
+{
+  preferences.begin(PREF_NS_ESP_NOW_MAC, false);
+  preferences.putString(PREF_KEY_CABIN_MAC, macToString(CABIN_MAC));
+  preferences.putString(PREF_KEY_VSG_MAC, macToString(VSG_MAC));
+  preferences.putString(PREF_KEY_VTG_MAC, macToString(VTG_MAC));
+  preferences.end();
+}
+
+static void applyEspNowPeersForStations()
+{
+  // This must be called after `esp_now_init()` and `esp_now_register_recv_cb()`.
+  // It updates the peer list to match current CABIN_MAC/VSG_MAC/VTG_MAC.
+
+  esp_now_del_peer(CABIN_MAC);
+  esp_now_del_peer(VSG_MAC);
+  esp_now_del_peer(VTG_MAC);
+
+  esp_now_peer_info_t peer = {};
+
+  memcpy(peer.peer_addr, CABIN_MAC, 6);
+  peer.channel = 0;
+  peer.encrypt = false;
+  esp_now_add_peer(&peer);
+
+  memcpy(peer.peer_addr, VSG_MAC, 6);
+  esp_now_add_peer(&peer);
+
+  memcpy(peer.peer_addr, VTG_MAC, 6);
+  esp_now_add_peer(&peer);
+}
 typedef struct struct_message
 {
   uint8_t fromID;
@@ -1006,6 +1109,9 @@ void handle_websocket_text(uint8_t *payload)
 
   JsonObject m_JsonObject_from_payload = m_JSONdoc_from_payload.as<JsonObject>();
 
+  bool anyMacUpdated = false;
+  uint8_t tmpMac[6];
+
   for (JsonPair keyValue : m_JsonObject_from_payload)
   {
     String m_key_string = keyValue.key().c_str();
@@ -1025,6 +1131,69 @@ void handle_websocket_text(uint8_t *payload)
       Serial.println(m_new_up_duration);
       // FloorToFloor_MS = m_new_up_duration;
     }
+
+    // Expected example payload:
+    // {"cabin_mac":"F8:B3:B7:4F:18:F4","vsg_mac":"EC:E3:34:1A:73:3C","vtg_mac":"1C:C3:AB:F9:A4:38"}
+    if (m_key_string == "cabin_mac" || m_key_string == "CABIN_MAC")
+    {
+      String macStr = m_JSONdoc_from_payload["cabin_mac"].as<String>();
+      if (macStr.length() == 0)
+        macStr = m_JSONdoc_from_payload["CABIN_MAC"].as<String>();
+
+      if (parseMacString(macStr, tmpMac))
+      {
+        memcpy(CABIN_MAC, tmpMac, 6);
+        anyMacUpdated = true;
+        Serial.println("Updated CABIN_MAC via websocket.");
+      }
+      else
+      {
+        Serial.println("Invalid cabin_mac format.");
+      }
+    }
+
+    if (m_key_string == "vsg_mac" || m_key_string == "VSG_MAC")
+    {
+      String macStr = m_JSONdoc_from_payload["vsg_mac"].as<String>();
+      if (macStr.length() == 0)
+        macStr = m_JSONdoc_from_payload["VSG_MAC"].as<String>();
+
+      if (parseMacString(macStr, tmpMac))
+      {
+        memcpy(VSG_MAC, tmpMac, 6);
+        anyMacUpdated = true;
+        Serial.println("Updated VSG_MAC via websocket.");
+      }
+      else
+      {
+        Serial.println("Invalid vsg_mac format.");
+      }
+    }
+
+    if (m_key_string == "vtg_mac" || m_key_string == "VTG_MAC")
+    {
+      String macStr = m_JSONdoc_from_payload["vtg_mac"].as<String>();
+      if (macStr.length() == 0)
+        macStr = m_JSONdoc_from_payload["VTG_MAC"].as<String>();
+
+      if (parseMacString(macStr, tmpMac))
+      {
+        memcpy(VTG_MAC, tmpMac, 6);
+        anyMacUpdated = true;
+        Serial.println("Updated VTG_MAC via websocket.");
+      }
+      else
+      {
+        Serial.println("Invalid vtg_mac format.");
+      }
+    }
+  }
+
+  if (anyMacUpdated)
+  {
+    saveStationMacsToPreferences();
+    applyEspNowPeersForStations();
+    // sendWebsocketAlert("INFO", "ESP-NOW station MACs updated & saved.");
   }
 }
 
@@ -2368,8 +2537,6 @@ void vESP_NOW(void *pvParams)
         bool emergStop = msg.responseFrame & (1 << 4);
         // bool vtgAlarm = msg.responseFrame & (1 << 6);
 
-        isConnected_CABIN = true;
-        bool doorClosed = msg.responseFrame & (1 << 0);
         if (isFirstCabinPacket)
         {
           if (xIdleLightTimer != NULL)
@@ -2674,7 +2841,7 @@ void vPollingSafetySling(void *pvParams)
 
     if (isSafetyActive == true && hasNotified == false)
     {
-      xTaskNotify(xOchestratorHandle, SAFETY_BRAKE, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+      // xTaskNotify(xOchestratorHandle, SAFETY_BRAKE, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
       hasNotified = true;
     }
     vTaskDelay(pdMS_TO_TICKS(20));
@@ -3083,6 +3250,12 @@ void setup()
   }
   esp_now_register_recv_cb(OnDataRecv);
 
+  loadStationMacsFromPreferences();
+  Serial.printf("ESP-NOW Station MACs:\n");
+  Serial.printf("  CABIN: %s\n", macToString(CABIN_MAC).c_str());
+  Serial.printf("  VSG  : %s\n", macToString(VSG_MAC).c_str());
+  Serial.printf("  VTG  : %s\n", macToString(VTG_MAC).c_str());
+
   esp_now_peer_info_t peerBroadcast = {};
   memcpy(peerBroadcast.peer_addr, broadcastAddress, 6);
   peerBroadcast.channel = 0;
@@ -3092,32 +3265,7 @@ void setup()
     Serial.println("Failed to add broadcast peer");
   }
 
-  esp_now_peer_info_t peerCabin = {};
-  memcpy(peerCabin.peer_addr, CABIN_MAC, 6);
-  peerCabin.channel = 0;
-  peerCabin.encrypt = false;
-  if (esp_now_add_peer(&peerCabin) != ESP_OK)
-  {
-    Serial.println("Failed to add Cabin peer");
-  }
-
-  esp_now_peer_info_t peerVsg = {};
-  memcpy(peerVsg.peer_addr, VSG_MAC, 6);
-  peerVsg.channel = 0;
-  peerVsg.encrypt = false;
-  if (esp_now_add_peer(&peerVsg) != ESP_OK)
-  {
-    Serial.println("Failed to add VSG peer");
-  }
-
-  esp_now_peer_info_t peerVtg = {};
-  memcpy(peerVtg.peer_addr, VTG_MAC, 6);
-  peerVtg.channel = 0;
-  peerVtg.encrypt = false;
-  if (esp_now_add_peer(&peerVtg) != ESP_OK)
-  {
-    Serial.println("Failed to add VTG peer");
-  }
+  applyEspNowPeersForStations();
 
   pinMode(WIFI_READY, OUTPUT);
   pinMode(R_UP, OUTPUT);
