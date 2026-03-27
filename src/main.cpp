@@ -254,7 +254,8 @@ vsg_t vsgState = {
     .shouldPause = false};
 
 uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-uint8_t CABIN_MAC[6] = {0xF8, 0xB3, 0xB7, 0x4F, 0x18, 0xF4};
+// uint8_t CABIN_MAC[6] = {0xF8, 0xB3, 0xB7, 0x4F, 0x18, 0xF4};
+uint8_t CABIN_MAC[6] = {0xF4, 0x2D, 0xC9, 0x70, 0xE3, 0xFC};
 uint8_t VSG_MAC[6] = {0xEC, 0xE3, 0x34, 0x1A, 0x73, 0x3C};
 uint8_t VTG_MAC[6] = {0x1C, 0xC3, 0xAB, 0xF9, 0xA4, 0x38};
 
@@ -289,7 +290,7 @@ static bool parseMacString(const String &macStr, uint8_t out[6])
   s.replace('.', ':');
 
   int matched = sscanf(s.c_str(), "%x:%x:%x:%x:%x:%x",
-                        &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]);
+                       &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]);
   if (matched == 6)
   {
     for (int i = 0; i < 6; i++)
@@ -2512,6 +2513,7 @@ void vESP_NOW(void *pvParams)
       result = esp_now_send(CABIN_MAC, (uint8_t *)&sendData, sizeof(sendData));
       if (result == ESP_OK)
       {
+        Serial.println("success sent to CABIN");
         cabinState.shouldWrite = false;
         // Serial.println("boardcast success!");
       }
@@ -2519,46 +2521,48 @@ void vESP_NOW(void *pvParams)
 
     /////////////////////////////////////polling block////////////////////////////////////
 
-    switch (currStation)
-    {
-    case CABIN_STA:
-      sendData.fromID = MASTER_ID;
-      // sendData.commandFrame = 0;
-      sendData.responseFrame = 0;
-      sendData.shouldResponse = true;
+    //----------------------------------paring esp_now block------------------------------//
 
-      if (isConnected_CABIN == false)
-      {
-        result = esp_now_send(CABIN_MAC, (uint8_t *)&sendData, sizeof(sendData));
-      }
-      // if (result == ESP_OK)
-      // {
-      //   // Serial.println("boardcast success!");
-      //   recvData.pollFromStation = 0;
-      // }
-      // currStation = VSG_STA;
-      break;
+    // switch (currStation)
+    // {
+    // case CABIN_STA:
+    //   sendData.fromID = MASTER_ID;
+    //   // sendData.commandFrame = 0;
+    //   sendData.responseFrame = 0;
+    //   sendData.shouldResponse = true;
 
-      // case VSG_STA:
-      //   sendData.fromID = MASTER_ID;
-      //   // sendData.commandFrame = 0;
-      //   sendData.responseFrame = 0;
-      //   sendData.shouldResponse = true;
+    //   if (isConnected_CABIN == false)
+    //   {
+    //     result = esp_now_send(CABIN_MAC, (uint8_t *)&sendData, sizeof(sendData));
+    //   }
+    //   // if (result == ESP_OK)
+    //   // {
+    //   //   // Serial.println("boardcast success!");
+    //   //   recvData.pollFromStation = 0;
+    //   // }
+    //   // currStation = VSG_STA;
+    //   break;
 
-      //   if (isConnected_VSG == false)
-      //   {
-      //     result = esp_now_send(VSG_MAC, (uint8_t *)&sendData, sizeof(sendData));
-      //   }
-      //   // if (result == ESP_OK)
-      //   // {
-      //   //   // Serial.println("boardcast success!");
-      //   // }
-      //   currStation = CABIN_STA;
-      //   break;
+    //   // case VSG_STA:
+    //   //   sendData.fromID = MASTER_ID;
+    //   //   // sendData.commandFrame = 0;
+    //   //   sendData.responseFrame = 0;
+    //   //   sendData.shouldResponse = true;
 
-    default:
-      break;
-    }
+    //   //   if (isConnected_VSG == false)
+    //   //   {
+    //   //     result = esp_now_send(VSG_MAC, (uint8_t *)&sendData, sizeof(sendData));
+    //   //   }
+    //   //   // if (result == ESP_OK)
+    //   //   // {
+    //   //   //   // Serial.println("boardcast success!");
+    //   //   // }
+    //   //   currStation = CABIN_STA;
+    //   //   break;
+
+    // default:
+    //   break;
+    // }
 
     /////////////////////////////////////action on bits block////////////////////////////////////
     // process each queued packet individually so no rising edge is lost between drain cycles
@@ -2566,7 +2570,7 @@ void vESP_NOW(void *pvParams)
     {
       if (msg.fromID == 2)
       {
-        isConnected_CABIN = true;
+        // isConnected_CABIN = true;
         bool isFirstCabinPacket = true;
 
         bool aim2 = msg.responseFrame & (1 << 1);
@@ -2578,15 +2582,23 @@ void vESP_NOW(void *pvParams)
 
         if (isFirstCabinPacket)
         {
-          if (xIdleLightTimer != NULL)
+          // if (xIdleLightTimer != NULL)
+          // {
+          //   xTimerReset(xIdleLightTimer, 0);
+          // }
+
+          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(50)) == pdTRUE)
           {
-            xTimerReset(xIdleLightTimer, 0);
+            writeBit(cabinState.writtenFrame[1], 5, true);
+            cabinState.shouldWrite = true;
+            xSemaphoreGive(dataMutex);
           }
+
           isFirstCabinPacket = false;
         }
 
         // update cabinState under mutex
-        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(50)) == pdTRUE)
         {
           cabinState.isDoorClosed = doorClosed;
           cabinState.isAim2 = aim2;
@@ -2654,18 +2666,18 @@ void vESP_NOW(void *pvParams)
         if (doorClosed != lastDoorState)
         {
           //--------------------turn on light after doorState is changed------------------------
-          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+          if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(50)) == pdTRUE)
           {
-            writeBit(cabinState.writtenFrame[1], 5, true); 
-            cabinState.shouldWrite = true;                 
+            writeBit(cabinState.writtenFrame[1], 5, true);
+            cabinState.shouldWrite = true;
             xSemaphoreGive(dataMutex);
           }
           if (xIdleLightTimer != NULL)
           {
-            xTimerReset(xIdleLightTimer, 0); 
+            xTimerReset(xIdleLightTimer, 0);
           }
           //-------------------------------------------------------------------------------------
-          
+
           if (doorClosed == true) // door is open
           {
             xTaskNotify(xOchestratorHandle, DOOR_IS_OPEN, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
@@ -2705,9 +2717,9 @@ void vESP_NOW(void *pvParams)
 
       if (msg.fromID == 4)
       {
-        isConnected_VSG = true;
+        // isConnected_VSG = true;
         bool vsgPause = msg.responseFrame & (1 << 0);
-        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(50)) == pdTRUE)
         {
           vsgState.shouldPause = vsgPause;
           xSemaphoreGive(dataMutex);
@@ -3048,7 +3060,7 @@ void vPublishTask(void *pvParams)
     bool vsgPause = false;
     bool vsgAlarm[5] = {false};
 
-    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+    if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(50)) == pdTRUE)
     {
       currState = elevator;
       hz = inverterState.running_hz;
