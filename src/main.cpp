@@ -2489,6 +2489,7 @@ void vESP_NOW(void *pvParams)
   static bool lastAim1 = false;
   static bool lastAim2 = false;
   static bool lastUserStop = false;
+  static bool isFirstCabinPacket = true;
 
   uint8_t stationID;
   uint8_t pollFromStation;
@@ -2576,8 +2577,6 @@ void vESP_NOW(void *pvParams)
       if (msg.fromID == 2)
       {
         // isConnected_CABIN = true;
-        bool isFirstCabinPacket = true;
-
         bool aim2 = msg.responseFrame & (1 << 1);
         bool aim1 = msg.responseFrame & (1 << 2);
         bool userStop = msg.responseFrame & (1 << 3);
@@ -2587,10 +2586,11 @@ void vESP_NOW(void *pvParams)
 
         if (isFirstCabinPacket)
         {
-          // if (xIdleLightTimer != NULL)
-          // {
-          //   xTimerReset(xIdleLightTimer, 0);
-          // }
+          
+          if (xIdleLightTimer != NULL)
+          {
+            xTimerReset(xIdleLightTimer, 0);
+          }
 
           if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(50)) == pdTRUE)
           {
