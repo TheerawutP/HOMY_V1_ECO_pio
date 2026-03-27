@@ -1744,12 +1744,17 @@ void vOchestrator(void *pvParams)
         {
           if (elevator.dir == DIR_UP)
           {
-
-            elevator.target = elevator.pos + 1;
+            if (elevator.pos == MAX_FLOOR)
+            {
+              elevator.target = elevator.pos;
+            }
+            else
+            {
+              elevator.target = elevator.pos + 1;
+            }
           }
           else
           {
-
             elevator.target = elevator.pos;
           }
         }
@@ -2876,7 +2881,7 @@ void vPollingSafetySling(void *pvParams)
 
   for (;;)
   {
-    bool raw_safetySling = (digitalRead(safetySling) == HIGH);
+    bool raw_safetySling = (digitalRead(safetySling) == LOW);
     if (raw_safetySling)
     {
       if (safetySling_counter < STABLE_THRESHOLD)
@@ -2892,7 +2897,9 @@ void vPollingSafetySling(void *pvParams)
 
     if (isSafetyActive == true && hasNotified == false)
     {
-      // xTaskNotify(xOchestratorHandle, SAFETY_BRAKE, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+      if(elevator.btwFloor != false && elevator.pos != MIN_FLOOR ){
+      xTaskNotify(xOchestratorHandle, SAFETY_BRAKE, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+      }
       hasNotified = true;
     }
     vTaskDelay(pdMS_TO_TICKS(20));
