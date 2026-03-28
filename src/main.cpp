@@ -172,7 +172,7 @@ volatile uint16_t writeFrame[5][16]; // slave id, write reg
 const char *mqtt_broker = "kit.flinkone.com";
 const int mqtt_port = 1883; // unencrypt
 const char *KIT_topic = "kit";
-const char *UT_case = "/UT_55555";
+const char *UT_case = "/UT_55556";
 const char *system_status = "/sys_v2";
 const char *elevator_status = "/ele_status";
 const char *inverter_status = "/inv_status";
@@ -1833,23 +1833,30 @@ void vOchestrator(void *pvParams)
 
         if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
-          writeFrameDFPlayer(SF_1005, cabinState.writtenFrame[1], cabinState.isBusy, 6);
-          enableTransmit(cabinState.shouldWrite);
-          writeBit(cabinState.writtenFrame[1], 3, true);
-          writeBit(cabinState.writtenFrame[1], 2, false);
-          writeBit(cabinState.writtenFrame[1], 1, false);
+          if (elevator.dir == DIR_UP && elevator.state != STATE_EMERGENCY)
+          {
+            writeFrameDFPlayer(SF_1005, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+            enableTransmit(cabinState.shouldWrite);
+            writeBit(cabinState.writtenFrame[1], 3, true);
+            writeBit(cabinState.writtenFrame[1], 2, false);
+            writeBit(cabinState.writtenFrame[1], 1, false);
+          }
           xSemaphoreGive(dataMutex);
         }
 
-        elevator.dir = DIR_DOWN;
-        elevator.target = 1;
-        command.dir = elevator.dir;
-        command.target = elevator.target;
-        elevator.state = STATE_PENDING;
-        // emoDeactivate();
+        if (elevator.dir == DIR_UP)
+        {
+          elevator.dir = DIR_DOWN;
+          elevator.target = elevator.pos;
+          command.dir = elevator.dir;
+          command.target = elevator.target;
+          elevator.state = STATE_PENDING;
+          // emoDeactivate();
 
-        transit(command);
-        sendWebsocketAlert("WARNING", "VTG is detected. Start to move down.");
+          transit(command);
+          sendWebsocketAlert("WARNING", "VTG is detected. Start to move down.");
+        }
+
         break;
 
       case VTG_CLEAR:
@@ -1999,7 +2006,7 @@ void vOchestrator(void *pvParams)
           writeBit(cabinState.writtenFrame[1], 4, true);
           writeBit(cabinState.writtenFrame[1], 3, false);
           writeBit(cabinState.writtenFrame[1], 2, false);
-          writeBit(cabinState.writtenFrame[1], 1, true);
+          writeBit(cabinState.writtenFrame[1], 1, false);
           writeBit(cabinState.writtenFrame[1], 0, true);
           xSemaphoreGive(dataMutex);
         }
@@ -2586,7 +2593,7 @@ void vESP_NOW(void *pvParams)
 
         if (isFirstCabinPacket)
         {
-          
+
           if (xIdleLightTimer != NULL)
           {
             xTimerReset(xIdleLightTimer, 0);
@@ -2747,14 +2754,13 @@ void vESP_NOW(void *pvParams)
       if (msg.fromID == 5)
       {
         bool vtgAlarm = msg.responseFrame & (1 << 0);
+
         if (vtgAlarm != lastVtgState)
         {
-          if (vtgAlarm == true && elevator.state != STATE_EMERGENCY)
+          if (vtgAlarm == true)
           {
-            if (elevator.dir == DIR_UP)
-            {
-              xTaskNotify(xOchestratorHandle, VTG_ALARM, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
-            }
+
+            xTaskNotify(xOchestratorHandle, VTG_ALARM, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
           }
           else
           {
@@ -2897,8 +2903,9 @@ void vPollingSafetySling(void *pvParams)
 
     if (isSafetyActive == true && hasNotified == false)
     {
-      if(elevator.btwFloor != false && elevator.pos != MIN_FLOOR ){
-      xTaskNotify(xOchestratorHandle, SAFETY_BRAKE, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+      if (elevator.btwFloor != false && elevator.pos != MIN_FLOOR)
+      {
+        xTaskNotify(xOchestratorHandle, SAFETY_BRAKE, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
       }
       hasNotified = true;
     }
