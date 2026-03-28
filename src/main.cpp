@@ -1914,7 +1914,7 @@ void vOchestrator(void *pvParams)
           elevator.state = STATE_PENDING;
           // emoDeactivate();
 
-          transit(command);
+          // transit(command);
           sendWebsocketAlert("WARNING", "VTG is detected. Start to move down.");
         }
 
@@ -1948,7 +1948,7 @@ void vOchestrator(void *pvParams)
           elevator.state = STATE_PENDING;
           // emoDeactivate();
 
-          transit(command);
+          // transit(command);
           sendWebsocketAlert("WARNING", "VSG is detected. Elevator paused.");
         }
         break;
