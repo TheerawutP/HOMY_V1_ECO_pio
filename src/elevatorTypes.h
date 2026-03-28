@@ -151,7 +151,13 @@ typedef struct{
  bool shouldPause;
 } vsg_t;
 
-
+typedef struct{
+  uint16_t writtenFrame[16];
+  bool shouldWrite;
+  
+  bool isDoorClosed;
+  bool vtgAlarm;
+} hall_t;
 
 #endif  
 

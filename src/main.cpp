@@ -253,6 +253,10 @@ vsg_t vsgState = {
     .isAlarm = {0},
     .shouldPause = false};
 
+hall_t hallState = {
+    .isDoorClosed = false,
+    .vtgAlarm = false};
+
 uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 // uint8_t CABIN_MAC[6] = {0xF8, 0xB3, 0xB7, 0x4F, 0x18, 0xF4};
 uint8_t CABIN_MAC[6] = {0xF4, 0x2D, 0xC9, 0x70, 0xE3, 0xFC};
@@ -564,16 +568,48 @@ void abortMotion()
   }
 }
 
+// bool isSafeToRun(direction_t dir)
+// {
+//   EventBits_t currentBits = xEventGroupGetBits(xRunningEventGroup);
+
+//   if (dir == DIR_UP)
+//   {
+//     if ((currentBits & BLOCK_UP_MASK) != 0)
+//     {
+//       Serial.printf("BLOCKED UP! Reason bits: 0x%X\n", (currentBits & BLOCK_UP_MASK));
+//       return false;
+//     }
+//   }
+//   else if (dir == DIR_DOWN)
+//   {
+//     if ((currentBits & BLOCK_DOWN_MASK) != 0)
+//     {
+//       Serial.printf("BLOCKED DOWN! Reason bits: 0x%X\n", (currentBits & BLOCK_DOWN_MASK));
+//       return false;
+//     }
+//   }
+
+//   return true;
+// }
+
 bool isSafeToRun(direction_t dir)
 {
   EventBits_t currentBits = xEventGroupGetBits(xRunningEventGroup);
+  uint8_t soundTrack = 0;
+  bool isBlocked = false;
 
   if (dir == DIR_UP)
   {
     if ((currentBits & BLOCK_UP_MASK) != 0)
     {
       Serial.printf("BLOCKED UP! Reason bits: 0x%X\n", (currentBits & BLOCK_UP_MASK));
-      return false;
+      isBlocked = true;
+      
+      if (currentBits & DOOR_OPEN_BIT) {
+        soundTrack = SF_1009; // please close the door
+      } else if (currentBits & VTG_BIT) {
+        soundTrack = SF_1005; // beware pinch (VTG)
+      }
     }
   }
   else if (dir == DIR_DOWN)
@@ -581,8 +617,33 @@ bool isSafeToRun(direction_t dir)
     if ((currentBits & BLOCK_DOWN_MASK) != 0)
     {
       Serial.printf("BLOCKED DOWN! Reason bits: 0x%X\n", (currentBits & BLOCK_DOWN_MASK));
-      return false;
+      isBlocked = true;
+      
+      if (currentBits & DOOR_OPEN_BIT) {
+        soundTrack = SF_1009; // please close the door
+      } else if (currentBits & VSG_BIT) {
+        soundTrack = SF_1004; // obstable under cabin (VSG)
+      }
     }
+  }
+
+  if (isBlocked)
+  {
+    if (soundTrack != 0)
+    {
+      if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
+      {
+        writeFrameDFPlayer(soundTrack, cabinState.writtenFrame[1], cabinState.isBusy, 6);
+        enableTransmit(cabinState.shouldWrite);
+        
+        writeBit(cabinState.writtenFrame[1], 3, true);
+        writeBit(cabinState.writtenFrame[1], 2, false);
+        writeBit(cabinState.writtenFrame[1], 1, false);
+        
+        xSemaphoreGive(dataMutex);
+      }
+    }
+    return false;
   }
 
   return true;
@@ -1825,7 +1886,7 @@ void vOchestrator(void *pvParams)
 
       case VTG_ALARM:
         xEventGroupSetBits(xRunningEventGroup, VTG_BIT);
-        Serial.println("VTG is detected!");
+        // Serial.println("VTG is detected!");
         // emoActivate();
         // abortMotion();
         M_STP();
@@ -1833,13 +1894,13 @@ void vOchestrator(void *pvParams)
 
         if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
-          if (elevator.dir == DIR_UP && elevator.state != STATE_EMERGENCY)
+          if (elevator.dir == DIR_UP && elevator.state == STATE_RUNNING)
           {
             writeFrameDFPlayer(SF_1005, cabinState.writtenFrame[1], cabinState.isBusy, 6);
             enableTransmit(cabinState.shouldWrite);
-            writeBit(cabinState.writtenFrame[1], 3, true);
-            writeBit(cabinState.writtenFrame[1], 2, false);
-            writeBit(cabinState.writtenFrame[1], 1, false);
+            // writeBit(cabinState.writtenFrame[1], 3, true);
+            // writeBit(cabinState.writtenFrame[1], 2, false);
+            // writeBit(cabinState.writtenFrame[1], 1, false);
           }
           xSemaphoreGive(dataMutex);
         }
@@ -1877,6 +1938,7 @@ void vOchestrator(void *pvParams)
           }
           xSemaphoreGive(dataMutex);
         }
+
         if (elevator.dir == DIR_DOWN)
         {
           elevator.dir = DIR_UP;
@@ -1893,10 +1955,10 @@ void vOchestrator(void *pvParams)
 
       case VSG_CLEAR:
         xEventGroupClearBits(xRunningEventGroup, VSG_BIT);
-        if (elevator.dir != DIR_NONE)
-        {
-          elevator.state = STATE_PENDING;
-        }
+        // if (elevator.dir != DIR_NONE)
+        // {
+        //   elevator.state = STATE_PENDING;
+        // }
         break;
 
       case MODBUS_TIMEOUT:
@@ -2754,6 +2816,12 @@ void vESP_NOW(void *pvParams)
       if (msg.fromID == 5)
       {
         bool vtgAlarm = msg.responseFrame & (1 << 0);
+
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
+          hallState.vtgAlarm = vtgAlarm;
+          xSemaphoreGive(dataMutex);
+        }
 
         if (vtgAlarm != lastVtgState)
         {
