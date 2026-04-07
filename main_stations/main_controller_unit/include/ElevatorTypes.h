@@ -43,6 +43,19 @@ struct user_command
 };
 
 
+
+constexpr uint32_t REACH_FLOOR_1       = (1 << 0); 
+constexpr uint32_t REACH_FLOOR_2       = (1 << 1);  
+constexpr uint32_t EMO_IS_PRESSED      = (1 << 2);  
+constexpr uint32_t SAFETY_BRAKE_ENGAGE = (1 << 3);
+
+// enum {
+//   REACH_FLOOR_1,
+//   REACH_FLOOR_2,
+//   EMO_IS_PRESSED,
+//   SAFETY_BRAKE_ENGAGE
+// }event_type_t;
+
 // enum modbusStation_t
 // {
 //   INVERTER_STA,

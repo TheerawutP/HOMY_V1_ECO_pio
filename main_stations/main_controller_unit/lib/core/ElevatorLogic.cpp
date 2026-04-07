@@ -1,4 +1,4 @@
-//ElevatorLogic.cpp
+// ElevatorLogic.cpp
 #include "ElevatorLogic.h"
 #include "Config.h"
 #include "ElevatorHal.h"
@@ -15,10 +15,10 @@ Orchestrator::Orchestrator(ElevatorHal *hardwarePtr)
     last_direction = elevator_direction_t::NONE;
 };
 
-void Orchestrator::update()
+void Orchestrator::update_position()
 {
     // 1. Sync data with hardware
-    hal->update_sensor();
+    // hal->update_sensor();  //move to vSensor
     uint8_t current_sensor_floor = hal->get_active_floor();
 
     // Update internal state if a floor is hit
@@ -31,8 +31,12 @@ void Orchestrator::update()
     {
         data.btw_floor = true;
     }
+};
 
-    // 2. Control flow based on state
+void Orchestrator::execute_state_machine()
+{
+
+    // Control flow based on state
     if (data.current_state == elevator_state_t::RUNNING)
     {
         // Check if reached target
@@ -54,7 +58,7 @@ void Orchestrator::update()
         }
         else
         {
-            // If calculate_direction returns NONE but we are RUNNING, 
+            // If calculate_direction returns NONE but we are RUNNING,
             // something is wrong or we are already there.
             hal->motor_stop();
             data.current_state = elevator_state_t::IDLE;
@@ -72,12 +76,6 @@ void Orchestrator::stop_running()
     this->hal->motor_stop();
     data.target = 0;
     data.current_state = elevator_state_t::IDLE;
-};
-
-void Orchestrator::start_running() {
-    // this->hal->motor_rotate();
-    // data.current_state = elevator_state_t::RUNNING;
-
 };
 
 elevator_direction_t Orchestrator::calculate_direction()
@@ -179,7 +177,29 @@ void Orchestrator::user_command_handle(user_command cmd)
     }
 };
 
-// void Ochestrator::eventHandle() {};
+void Orchestrator::event_handle(uint32_t evt_mask)
+{
+    if (evt_mask & SAFETY_BRAKE_ENGAGE)
+    {
+        Serial.println("[CRITICAL] Sling cut detected! EMERGENCY state!");
+        stop_running();
+        data.current_state = elevator_state_t::EMERGENCY;
+    }
+
+    //if ...
+    //if ... 2
+    
+};
+
 // void Ochestrator::isReachFloor(uint8_t floorNum) {};
 // void Ochestrator::clearCommand() {};
 // void Ochestrator::isSafeToRun(ElevatorDirection dir) {};
+
+// elevator_snapshot get_current_state() {
+//     elevator_snapshot temp;
+//     if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+//         temp = this->state;
+//         xSemaphoreGive(dataMutex);
+//     }
+//     return temp;
+// }

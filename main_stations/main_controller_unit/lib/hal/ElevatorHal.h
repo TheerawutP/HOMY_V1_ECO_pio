@@ -1,7 +1,8 @@
 #pragma once
 #include "ElevatorTypes.h"
 
-class ElevatorHal {
+class ElevatorHal
+{
 public:
     // Hardware initialization
     virtual void init_pins() = 0;
@@ -14,7 +15,8 @@ public:
     virtual uint8_t get_active_floor() = 0;
 };
 
-class IOManager : public ElevatorHal {
+class IOManager : public ElevatorHal
+{
 private:
     uint8_t pin_motor_up;
     uint8_t pin_motor_down;
@@ -26,6 +28,7 @@ private:
     uint8_t pin_speed;
     uint8_t pin_sling;
 
+public:
     bool status_floor1;
     bool status_floor2;
     bool status_emo;
@@ -33,7 +36,6 @@ private:
     bool status_sling;
     bool status_brake;
 
-public:
     IOManager(
         uint8_t pin_motor_up,
         uint8_t pin_motor_down,
@@ -43,8 +45,7 @@ public:
         uint8_t pin_emo,
         uint8_t pin_no_power,
         uint8_t pin_speed,
-        uint8_t pin_sling
-    );
+        uint8_t pin_sling);
 
     void init_pins() override;
     void motor_rotate(elevator_direction_t dir) override;

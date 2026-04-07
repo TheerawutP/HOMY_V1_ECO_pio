@@ -29,6 +29,10 @@ const uint8_t PIN_NO_POWER = 27;
 const uint8_t PIN_SPEED = 14;
 const uint8_t PIN_SLING = 26;
 
+
+
+
+
 // #define MASTER_ID 100
 
 // // RF remote codes
