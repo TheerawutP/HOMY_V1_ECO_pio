@@ -56,8 +56,8 @@ void vSensorMonitor(void *pvParams)
     for (;;)
     {
         io.update_sensor();
-        is_at_floor_1 = io.status_floor1;
-        is_at_floor_2 = io.status_floor2;
+        is_at_floor_1 = io.status_floor_1;
+        is_at_floor_2 = io.status_floor_2;
         is_emo = io.status_emo;
         is_speed_trig = io.status_governor;
         is_sling_cut = io.status_sling;
