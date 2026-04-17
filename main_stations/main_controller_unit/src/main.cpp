@@ -12,6 +12,7 @@
 #include "RFManager.h"
 #include "ElevatorStorage.h"
 
+EspNow espNowBroker;
 IOManager io(PIN_UP, PIN_DOWN, PIN_BRAKE, PIN_SS_FLOOR_1, PIN_SS_FLOOR_2, PIN_EMO, PIN_NO_POWER, PIN_SPEED, PIN_SLING); // create obj hal
 Orchestrator logic(&io);
 
@@ -67,10 +68,28 @@ void vSensorMonitor(void *pvParams)
         // if (is_at_floor_2) xTaskNotify(xElevatorHandle, REACH_FLOOR_2, eSetValueWithOverwrite);
         // if (is_emo) xTaskNotify(xElevatorHandle, EMO_IS_PRESSED, eSetValueWithOverwrite);
         
-        if (is_sling_cut)
+        // if (is_sling_cut)
+        // {
+        //     xTaskNotify(xElevatorHandle, SAFETY_BRAKE_ENGAGE, eSetBits);
+        // }
+
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
+void vEspNowManager(void *pvParams)
+{
+    espNowBroker.init();
+    espnow_msg_t incoming_msg;
+
+    for (;;)
+    {
+        while (espNowBroker.receive_message(&incoming_msg))
         {
-            xTaskNotify(xElevatorHandle, SAFETY_BRAKE_ENGAGE, eSetValueWithOverwrite);
+            logic.process_remote_message(incoming_msg);
         }
+
+        // espNowBroker.update();
 
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -129,6 +148,8 @@ void setup()
     io.init_pins();
 
     xTaskCreate(vElevatorManager, "ElevatorManager", 4096, NULL, 3, &xElevatorHandle);
+    xTaskCreate(vSensorMonitor, "SensorMonitor", 4096, NULL, 3, NULL);
+    xTaskCreate(vEspNowManager, "EspNowManager", 4096, NULL, 3, NULL);
     // xTaskCreate(vSensorMonitor, "SensorMonitor", 4096, NULL, 2, NULL);
     // xTaskCreate(vTelemetry, "Telemetry", 8192, NULL, 2, NULL);
     // xTaskCreate(vDataLog, "DataLog", 2048, NULL, 2, NULL);

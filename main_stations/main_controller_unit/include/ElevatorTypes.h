@@ -42,12 +42,37 @@ struct user_command
 
 };
 
+typedef struct
+{
+    uint8_t fromID;
+    uint16_t commandFrame;
+    uint16_t responseFrame;
+    bool shouldResponse;
+} espnow_msg_t;
 
+enum class station_role_t : uint8_t
+{
+    UNKNOWN = 0,
+    INVERTER = 1,
+    CABIN = 2,
+    HALL_1 = 3,
+    HALL_2 = 4,
+    HALL_3 = 5,
+    VSG = 6,
+    VTG = 7,
+    MASTER = 100
+};
 
-constexpr uint32_t REACH_FLOOR_1       = (1 << 0); 
-constexpr uint32_t REACH_FLOOR_2       = (1 << 1);  
-constexpr uint32_t EMO_IS_PRESSED      = (1 << 2);  
-constexpr uint32_t SAFETY_BRAKE_ENGAGE = (1 << 3);
+struct station_info_t
+{
+    station_role_t role;
+    uint8_t mac[6];
+};
+
+// constexpr uint32_t REACH_FLOOR_1       = (1 << 0); 
+// constexpr uint32_t REACH_FLOOR_2       = (1 << 1);  
+// constexpr uint32_t EMO_IS_PRESSED      = (1 << 2);  
+// constexpr uint32_t SAFETY_BRAKE_ENGAGE = (1 << 3);
 
 // enum {
 //   REACH_FLOOR_1,

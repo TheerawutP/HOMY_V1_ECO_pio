@@ -3,32 +3,6 @@
 #include <esp_now.h>
 #include "ElevatorTypes.h"
 
-typedef struct
-{
-    uint8_t fromID;
-    uint16_t commandFrame;
-    uint16_t responseFrame;
-    bool shouldResponse;
-} espnow_msg_t;
-
-enum class station_role_t : uint8_t
-{
-    UNKNOWN = 0,
-    INVERTER = 1,
-    CABIN = 2,
-    HALL_1 = 3,
-    HALL_2 = 4,
-    HALL_3 = 5,
-    VSG = 6,
-    VTG = 7,
-    MASTER = 100
-};
-
-struct station_info_t
-{
-    station_role_t role;
-    uint8_t mac[6];
-};
 
 // 1. Interface class
 class EspNowManager

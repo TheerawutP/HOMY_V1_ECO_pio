@@ -5,6 +5,9 @@
 #include "ElevatorTypes.h"
 #include <Arduino.h>
 
+extern QueueHandle_t xQueueCommand;
+extern TaskHandle_t xElevatorHandle;
+
 Orchestrator::Orchestrator(ElevatorHal *hardwarePtr)
 
 {
@@ -179,6 +182,8 @@ void Orchestrator::user_command_handle(user_command cmd)
 
 void Orchestrator::event_handle(uint32_t evt_mask)
 {
+    // !!! high priority events that can cause safety issues should be handled first, regardless of current state
+
     if (evt_mask & SAFETY_BRAKE_ENGAGE)
     {
         Serial.println("[CRITICAL] Sling cut detected! EMERGENCY state!");
@@ -186,9 +191,126 @@ void Orchestrator::event_handle(uint32_t evt_mask)
         data.current_state = elevator_state_t::EMERGENCY;
     }
 
-    //if ...
-    //if ... 2
-    
+    // =========================================================
+    // 🟠 Priority 2:  (System Protection)
+    // if it's not in EMERGENCY, then these events can cause safety issues and should be handled immediately.
+    // =========================================================
+    if (data.current_state != elevator_state_t::EMERGENCY)
+    {
+        if (evt_mask & VSG_ALARM_TRIGGER)
+        {
+            Serial.println("[WARN] VSG IS ALARM (VSG) -> STOP!");
+            stop_running();
+            data.current_state = elevator_state_t::IDLE;
+        }
+
+        if (evt_mask & DOOR_IS_OPEN)
+        {
+            Serial.println("[INFO] DOOR IS OPEN -> STOP!");
+            stop_running();
+            data.current_state = elevator_state_t::IDLE;
+        }
+    }
+
+    // =========================================================
+    // 🟢 Priority 3: (Normal Events)
+    // =========================================================
+    if (evt_mask & DOOR_IS_CLOSED)
+    {
+        Serial.println("[INFO] DOOR IS CLOSED -> CAN RUN!");
+    }
+};
+
+void Orchestrator::process_remote_message(espnow_msg_t msg)
+{
+
+    if (msg.fromID == (uint8_t)station_role_t::CABIN)
+    {
+        uint16_t current_cabin = msg.responseFrame;
+
+        if (current_cabin != last_cabin_frame)
+        {
+            bool doorClosed = current_cabin & (1 << 0);
+            bool aim2 = current_cabin & (1 << 1);
+            bool aim1 = current_cabin & (1 << 2);
+            bool userStop = current_cabin & (1 << 3);
+            bool emergStop = current_cabin & (1 << 4);
+
+            bool last_doorClosed = last_cabin_frame & (1 << 0);
+            bool last_aim2 = last_cabin_frame & (1 << 1);
+            bool last_aim1 = last_cabin_frame & (1 << 2);
+            bool last_userStop = last_cabin_frame & (1 << 3);
+            bool last_emergStop = last_cabin_frame & (1 << 4);
+
+            // ----------------------------------------------------
+            // user command -> get in queue
+            // ----------------------------------------------------
+            if (aim1 && !last_aim1)
+            {
+                user_command cmd = {1, command_type_t::TRANSIT};
+                xQueueSend(xQueueCommand, &cmd, 0);
+            }
+            if (aim2 && !last_aim2)
+            {
+                user_command cmd = {2, command_type_t::TRANSIT};
+                xQueueSend(xQueueCommand, &cmd, 0);
+            }
+            if (userStop && !last_userStop)
+            {
+                user_command cmd = {0, command_type_t::STOP};
+                xQueueSend(xQueueCommand, &cmd, 0);
+            }
+            if (emergStop && !last_emergStop)
+            {
+                user_command cmd = {0, command_type_t::E_STOP};
+                xQueueSend(xQueueCommand, &cmd, 0);
+            }
+
+            // ----------------------------------------------------
+            // event notify -> send event to task
+            // ----------------------------------------------------
+            // eSetBits
+
+            if (doorClosed != last_doorClosed)
+            {
+                if (doorClosed)
+                {
+                    xTaskNotify(xElevatorHandle, DOOR_IS_CLOSED, eSetBits);
+                }
+                else
+                {
+                    xTaskNotify(xElevatorHandle, DOOR_IS_OPEN, eSetBits);
+                }
+            }
+
+            last_cabin_frame = current_cabin;
+        }
+    }
+
+    // ==========================================
+    // data from VSG
+    // ==========================================
+    else if (msg.fromID == (uint8_t)station_role_t::VSG)
+    {
+        uint16_t current_vsg = msg.responseFrame;
+
+        if (current_vsg != last_vsg_frame)
+        {
+            bool vsgPause = current_vsg & (1 << 0);
+            bool last_vsgPause = last_vsg_frame & (1 << 0);
+
+            if (vsgPause && !last_vsgPause)
+            {
+                xTaskNotify(xElevatorHandle, VSG_ALARM_TRIGGER, eSetBits);
+            }
+            else if (!vsgPause && last_vsgPause)
+            {
+                xTaskNotify(xElevatorHandle, VSG_ALARM_CLEAR, eSetBits);
+            }
+
+            last_vsg_frame = current_vsg;
+        }
+    }
 };
 
 // void Ochestrator::isReachFloor(uint8_t floorNum) {};

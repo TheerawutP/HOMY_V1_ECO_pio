@@ -29,7 +29,13 @@ const uint8_t PIN_NO_POWER = 27;
 const uint8_t PIN_SPEED = 14;
 const uint8_t PIN_SLING = 26;
 
-
+#define SAFETY_BRAKE_ENGAGE   (1 << 0)
+#define DOOR_IS_OPEN          (1 << 1)
+#define DOOR_IS_CLOSED        (1 << 2)
+#define EMO_IS_PRESSED        (1 << 3)
+#define EMO_IS_RELEASED       (1 << 4)
+#define VSG_ALARM_TRIGGER     (1 << 5)
+#define VSG_ALARM_CLEAR       (1 << 6)
 
 
 
