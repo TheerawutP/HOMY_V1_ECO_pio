@@ -149,7 +149,6 @@ bool EspNow::send_command(station_role_t target_role, uint16_t frame)
     espnow_msg_t sendData;
     sendData.id = (uint8_t)station_role_t::MASTER;
     sendData.cmd = frame;
-    sendData.response= 0;
 
     bool sendSuccess = false;
 

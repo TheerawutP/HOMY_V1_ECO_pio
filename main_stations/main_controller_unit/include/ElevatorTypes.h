@@ -129,3 +129,18 @@ const int num_rf_keys = sizeof(rf_keys) / sizeof(rf_keymap_t);
 #define OUT_TRACK_BIT1      (1 << 9)  // Bit 9: SFunc BIT1
 #define OUT_TRACK_BIT2      (1 << 10) // Bit 10: SFunc BIT2
 #define OUT_TRACK_BIT3      (1 << 11) // Bit 11: SFunc BIT3
+
+// block moving 
+#define DOOR_OPEN_BIT (1 << 0)  
+#define EMG_STOP_BIT (1 << 1)     
+
+// block go up
+#define VTG_BIT (1 << 2) 
+
+// block go down
+#define SAFETY_BRAKE_BIT (1 << 3) 
+#define VSG_BIT (1 << 4)         
+
+// block dir group (true = dont allowed)
+#define BLOCK_UP_MASK (VTG_BIT | EMG_STOP_BIT | DOOR_OPEN_BIT)
+#define BLOCK_DOWN_MASK (SAFETY_BRAKE_BIT | VSG_BIT | EMG_STOP_BIT | DOOR_OPEN_BIT)

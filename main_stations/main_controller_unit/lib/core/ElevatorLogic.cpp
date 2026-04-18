@@ -7,6 +7,7 @@
 
 extern QueueHandle_t xQueueCommand;
 extern TaskHandle_t xElevatorHandle;
+extern QueueHandle_t xQueueSending;
 
 Orchestrator::Orchestrator(ElevatorHal *hardwarePtr)
 
@@ -16,6 +17,9 @@ Orchestrator::Orchestrator(ElevatorHal *hardwarePtr)
     data.btw_floor = false;
     data.current_state = elevator_state_t::IDLE;
     last_direction = elevator_direction_t::NONE;
+
+    xSafetyEventGroup = xEventGroupCreate();
+    xEventGroupClearBits(xSafetyEventGroup, 0xFFFFFF);
 };
 
 void Orchestrator::update_position()
@@ -56,8 +60,11 @@ void Orchestrator::execute_state_machine()
         elevator_direction_t dir = calculate_direction();
         if (dir != elevator_direction_t::NONE)
         {
-            hal->motor_rotate(dir);
-            last_direction = dir;
+            if (is_safe_to_run(dir))
+            {
+                hal->motor_rotate(dir);
+                last_direction = dir;
+            }
         }
         else
         {
@@ -183,12 +190,16 @@ void Orchestrator::user_command_handle(user_command cmd)
 void Orchestrator::event_handle(uint32_t evt_mask)
 {
     // !!! high priority events that can cause safety issues should be handled first, regardless of current state
+    espnow_msg_t outgoing_msg;
 
     if (evt_mask & SAFETY_BRAKE_ENGAGE)
     {
         Serial.println("[CRITICAL] Sling cut detected! EMERGENCY state!");
         stop_running();
         data.current_state = elevator_state_t::EMERGENCY;
+
+        outgoing_msg = {(uint8_t)station_role_t::CABIN, OUT_EN_BRAKE};
+        xQueueSend(xQueueSending, &outgoing_msg, 0);
     }
 
     // =========================================================
@@ -199,15 +210,52 @@ void Orchestrator::event_handle(uint32_t evt_mask)
     {
         if (evt_mask & VSG_ALARM_TRIGGER)
         {
-            Serial.println("[WARN] VSG IS ALARM (VSG) -> STOP!");
-            stop_running();
-            data.current_state = elevator_state_t::IDLE;
+            xEventGroupSetBits(xSafetyEventGroup, VSG_BIT);
+
+            if (data.current_state == elevator_state_t::RUNNING)
+            {
+                Serial.println("[WARN] VSG IS ALARM (VSG) -> STOP!");
+                stop_running();
+                data.current_state = elevator_state_t::IDLE;
+
+                user_command cmd = {2, command_type_t::TRANSIT};
+                xQueueSend(xQueueCommand, &cmd, 0);
+            }
+        }
+
+        if (evt_mask & VSG_ALARM_CLEAR)
+        {
+            xEventGroupClearBits(xSafetyEventGroup, VSG_BIT);
+            Serial.println("[INFO] VSG ALARM IS CLEARED (VSG) -> CAN RUN!");
+        }
+
+        if (evt_mask & VTG_ALARM_TRIGGER)
+        {
+            xEventGroupSetBits(xSafetyEventGroup, VTG_BIT);
+            if (data.current_state == elevator_state_t::RUNNING)
+            {
+                Serial.println("[WARN] VTG IS ALARM (VTG) -> STOP!");
+                stop_running();
+                this->hal->emergency_stop();
+                data.current_state = elevator_state_t::IDLE;
+
+                user_command cmd = {1, command_type_t::TRANSIT};
+                xQueueSend(xQueueCommand, &cmd, 0);
+            }
+        }
+
+        if (evt_mask & VTG_ALARM_CLEAR)
+        {
+            xEventGroupClearBits(xSafetyEventGroup, VTG_BIT);
+            Serial.println("[INFO] VTG ALARM IS CLEARED (VTG) -> CAN RUN!");
         }
 
         if (evt_mask & DOOR_IS_OPEN)
         {
+            xEventGroupSetBits(xSafetyEventGroup, DOOR_OPEN_BIT);
             Serial.println("[INFO] DOOR IS OPEN -> STOP!");
             stop_running();
+            this->hal->emergency_stop();
             data.current_state = elevator_state_t::IDLE;
         }
     }
@@ -217,6 +265,7 @@ void Orchestrator::event_handle(uint32_t evt_mask)
     // =========================================================
     if (evt_mask & DOOR_IS_CLOSED)
     {
+        xEventGroupClearBits(xSafetyEventGroup, DOOR_OPEN_BIT);
         Serial.println("[INFO] DOOR IS CLOSED -> CAN RUN!");
     }
 };
@@ -226,7 +275,7 @@ void Orchestrator::process_remote_message(espnow_msg_t msg)
 
     if (msg.id == (uint8_t)station_role_t::CABIN)
     {
-        uint16_t current_cabin = msg.response;
+        uint16_t current_cabin = msg.cmd;
 
         if (current_cabin != last_cabin_frame)
         {
@@ -292,7 +341,7 @@ void Orchestrator::process_remote_message(espnow_msg_t msg)
     // ==========================================
     else if (msg.id == (uint8_t)station_role_t::VSG)
     {
-        uint16_t current_vsg = msg.response;
+        uint16_t current_vsg = msg.cmd;
 
         if (current_vsg != last_vsg_frame)
         {
@@ -311,6 +360,27 @@ void Orchestrator::process_remote_message(espnow_msg_t msg)
             last_vsg_frame = current_vsg;
         }
     }
+};
+
+bool Orchestrator::is_safe_to_run(elevator_direction_t dir)
+{
+    EventBits_t safety_status = xEventGroupGetBits(xSafetyEventGroup);
+
+    // Check door status
+    if (safety_status & DOOR_OPEN_BIT)
+    {
+        Serial.println("[SAFETY CHECK] Door is open! Not safe to run.");
+        return false;
+    }
+
+    // Check VSG and VTG status
+    if (safety_status & (VSG_BIT | VTG_BIT))
+    {
+        Serial.println("[SAFETY CHECK] VSG or VTG is in alarm state! Not safe to run.");
+        return false;
+    }
+
+    return true; // Safe to run
 };
 
 // void Ochestrator::isReachFloor(uint8_t floorNum) {};
