@@ -54,8 +54,8 @@ bool EspNow::init()
         return false;
     }
 
-    esp_now_register_recv_cb(OnDataRecvStatic);
-    esp_now_register_send_cb(OnDataSentStatic);
+    esp_now_register_recv_cb(on_data_recv_static);
+    esp_now_register_send_cb(on_data_sent_static);
 
     Serial.println("[ESP-NOW] Initialized Successfully");
     return true;
@@ -63,30 +63,30 @@ bool EspNow::init()
 
 // --- Static Callbacks ---
 
-void EspNow::OnDataRecvStatic(const uint8_t *mac, const uint8_t *incomingData, int len)
+void EspNow::on_data_recv_static(const uint8_t *mac, const uint8_t *incomingData, int len)
 {
     if (instance)
     {
-        instance->handleDataRecv(mac, incomingData, len);
+        instance->handle_data_recv(mac, incomingData, len);
     }
 }
 
-void EspNow::OnDataSentStatic(const uint8_t *mac, esp_now_send_status_t status)
+void EspNow::on_data_sent_static(const uint8_t *mac, esp_now_send_status_t status)
 {
     if (instance)
     {
-        instance->handleDataSent(mac, status);
+        instance->handle_data_sent(mac, status);
     }
 }
 
-void EspNow::handleDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
+void EspNow::handle_data_recv(const uint8_t *mac, const uint8_t *incomingData, int len)
 {
     espnow_msg_t tempMsg;
 
     if (len == sizeof(tempMsg))
     {
         memcpy(&tempMsg, incomingData, sizeof(tempMsg));
-        uint8_t role_idx = tempMsg.fromID;
+        uint8_t role_idx = tempMsg.id;
 
         if (role_idx > 0 && role_idx < 10)
         {
@@ -118,7 +118,7 @@ void EspNow::handleDataRecv(const uint8_t *mac, const uint8_t *incomingData, int
     }
 }
 
-void EspNow::handleDataSent(const uint8_t *mac, esp_now_send_status_t status)
+void EspNow::handle_data_sent(const uint8_t *mac, esp_now_send_status_t status)
 {
     lastSendStatus = status;
     isSendComplete = true;
@@ -147,10 +147,9 @@ bool EspNow::send_command(station_role_t target_role, uint16_t frame)
     }
 
     espnow_msg_t sendData;
-    sendData.fromID = (uint8_t)station_role_t::MASTER;
-    sendData.commandFrame = frame;
-    sendData.responseFrame = 0;
-    sendData.shouldResponse = false;
+    sendData.id = (uint8_t)station_role_t::MASTER;
+    sendData.cmd = frame;
+    sendData.response= 0;
 
     bool sendSuccess = false;
 
@@ -258,8 +257,6 @@ bool EspNow::get_latest_data(station_role_t role, espnow_msg_t *out_data)
     }
     return false;
 }
-
-// --- Update (for update data to struct of each station. wait for Elevator.update()) ---
 
 void EspNow::update()
 {

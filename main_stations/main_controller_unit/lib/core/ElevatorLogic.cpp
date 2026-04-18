@@ -171,7 +171,7 @@ void Orchestrator::user_command_handle(user_command cmd)
         }
         break;
 
-    case command_type_t::E_STOP:
+    case command_type_t::EMG_STOP:
         /* code */
         break;
 
@@ -224,9 +224,9 @@ void Orchestrator::event_handle(uint32_t evt_mask)
 void Orchestrator::process_remote_message(espnow_msg_t msg)
 {
 
-    if (msg.fromID == (uint8_t)station_role_t::CABIN)
+    if (msg.id == (uint8_t)station_role_t::CABIN)
     {
-        uint16_t current_cabin = msg.responseFrame;
+        uint16_t current_cabin = msg.response;
 
         if (current_cabin != last_cabin_frame)
         {
@@ -262,7 +262,7 @@ void Orchestrator::process_remote_message(espnow_msg_t msg)
             }
             if (emergStop && !last_emergStop)
             {
-                user_command cmd = {0, command_type_t::E_STOP};
+                user_command cmd = {0, command_type_t::EMG_STOP};
                 xQueueSend(xQueueCommand, &cmd, 0);
             }
 
@@ -290,9 +290,9 @@ void Orchestrator::process_remote_message(espnow_msg_t msg)
     // ==========================================
     // data from VSG
     // ==========================================
-    else if (msg.fromID == (uint8_t)station_role_t::VSG)
+    else if (msg.id == (uint8_t)station_role_t::VSG)
     {
-        uint16_t current_vsg = msg.responseFrame;
+        uint16_t current_vsg = msg.response;
 
         if (current_vsg != last_vsg_frame)
         {

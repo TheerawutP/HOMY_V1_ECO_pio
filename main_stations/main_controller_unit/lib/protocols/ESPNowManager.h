@@ -46,15 +46,15 @@ private:
     // static void OnDataRecvStatic(const uint8_t *mac, const uint8_t *incomingData, int len);
     // static void OnDataSentStatic(const uint8_t *mac, esp_now_send_status_t status);
 
-    void handleDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len);
-    void handleDataSent(const uint8_t *mac, esp_now_send_status_t status);
+    void handle_data_recv(const uint8_t *mac, const uint8_t *incomingData, int len);
+    void handle_data_sent(const uint8_t *mac, esp_now_send_status_t status);
 
 public:
     EspNow();
     ~EspNow();
 
-    static void OnDataRecvStatic(const uint8_t *mac, const uint8_t *incomingData, int len);
-    static void OnDataSentStatic(const uint8_t *mac, esp_now_send_status_t status);
+    static void on_data_recv_static(const uint8_t *mac, const uint8_t *incomingData, int len);
+    static void on_data_sent_static(const uint8_t *mac, esp_now_send_status_t status);
 
     bool init() override;
     void update() override;

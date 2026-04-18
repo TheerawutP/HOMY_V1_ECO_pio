@@ -12,7 +12,8 @@
 #include "RFManager.h"
 #include "ElevatorStorage.h"
 
-EspNow espNowBroker;
+EspNow espnow;
+RFManager rf;
 IOManager io(PIN_UP, PIN_DOWN, PIN_BRAKE, PIN_SS_FLOOR_1, PIN_SS_FLOOR_2, PIN_EMO, PIN_NO_POWER, PIN_SPEED, PIN_SLING); // create obj hal
 Orchestrator logic(&io);
 
@@ -20,7 +21,7 @@ TaskHandle_t xElevatorHandle;
 QueueHandle_t xQueueCommand = NULL;
 SemaphoreHandle_t dataMutex = NULL;
 
-void vElevatorManager(void *pvParams)
+void elevator_manager_task(void *pvParams)
 {
     user_command cmd;
     uint32_t evt;
@@ -44,7 +45,7 @@ void vElevatorManager(void *pvParams)
     }
 }
 
-void vSensorMonitor(void *pvParams)
+void sensor_monitor_task(void *pvParams)
 {
 
     bool is_at_floor_1 = false;
@@ -77,67 +78,37 @@ void vSensorMonitor(void *pvParams)
     }
 }
 
-void vEspNowManager(void *pvParams)
+void esp_now_manager_task(void *pvParams)
 {
-    espNowBroker.init();
+    espnow.init();
     espnow_msg_t incoming_msg;
 
     for (;;)
     {
-        while (espNowBroker.receive_message(&incoming_msg))
+        while (espnow.receive_message(&incoming_msg))
         {
             logic.process_remote_message(incoming_msg);
         }
 
-        // espNowBroker.update();
+        // espnow.update();
 
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
 
-// void vRFReceiver(void *pvParams)
-// {
-//     for(;;){
-//         rf.receive();
-//         vTaskDelay(pdMS_TO_TICKS(50));
-//     }
-// }
+void rf_receiver_task(void *pvParams)
+{   rf.init(pin_rf_receiver);
+
+    for(;;){
+        rf.process_rf_cmd(xQueueCommand);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+}
 
 // void vModbusPolling(void *pvParams)
-// {
-//     for(;;){
-//     switch (currentStation) {
-//         case INVERTER:
-//         mb.read(currentStation);
-//         break;
-//     default:
-//     break;
-//     }
-//     if(xQueueReceive(xQueueWrite, &sta, 0) == pdPASS){
-//         mb.write(sta);
-//     }
-//     vTaskDelay(pdMS_TO_TICKS(20));
-//     }
-// }
-
 // void vTelemetry(void *pvParams)
-// {
-//     for (;;)
-//     {
-//         tl.initWebsocket();
-//         tl.reconnect();
-//         tl.publish();
-//         vTaskDelay(pdMS_TO_TICKS(20));
-//     }
-// }
-
 // void vDataLog(void *pvParams)
-// {
-//     for (;;)
-//     {
-//         vTaskDelay(pdMS_TO_TICKS(20));
-//     }
-// }
 
 void setup()
 {
@@ -147,41 +118,15 @@ void setup()
 
     io.init_pins();
 
-    xTaskCreate(vElevatorManager, "ElevatorManager", 4096, NULL, 3, &xElevatorHandle);
-    xTaskCreate(vSensorMonitor, "SensorMonitor", 4096, NULL, 3, NULL);
-    xTaskCreate(vEspNowManager, "EspNowManager", 4096, NULL, 3, NULL);
-    // xTaskCreate(vSensorMonitor, "SensorMonitor", 4096, NULL, 2, NULL);
+    xTaskCreate(elevator_manager_task, "ElevatorManager", 4096, NULL, 3, &xElevatorHandle);
+    xTaskCreate(sensor_monitor_task, "SensorMonitor", 4096, NULL, 3, NULL);
+    xTaskCreate(esp_now_manager_task, "EspNowManager", 4096, NULL, 3, NULL);
+    xTaskCreate(rf_receiver_task, "RFReceiver", 4096, NULL, 3, NULL);
     // xTaskCreate(vTelemetry, "Telemetry", 8192, NULL, 2, NULL);
     // xTaskCreate(vDataLog, "DataLog", 2048, NULL, 2, NULL);
 }
 
 void loop()
 {
-    if (Serial.available() > 0)
-    {
-        char incoming = Serial.read();
-        if (incoming == '1' || incoming == '2')
-        {
-            user_command cmd;
-            cmd.target = (uint8_t)(incoming - '0');
-            cmd.type = command_type_t::TRANSIT;
 
-            if (xQueueSend(xQueueCommand, &cmd, 0) == pdPASS)
-            {
-                Serial.printf("[TEST] Sending command to Floor %d\n", cmd.target);
-            }
-        }
-
-        else if (incoming == 's' || incoming == 'S')
-        {
-            user_command cmd;
-            cmd.type = command_type_t::STOP;
-
-            if (xQueueSend(xQueueCommand, &cmd, 0) == pdPASS)
-            {
-                Serial.println("[TEST] Sending STOP command!");
-            }
-        }
-    }
-    vTaskDelay(pdMS_TO_TICKS(100));
 }
