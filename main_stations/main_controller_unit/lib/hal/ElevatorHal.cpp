@@ -44,6 +44,7 @@ void IOManager::init_pins() {
     pinMode(pin_motor_up, OUTPUT);
     pinMode(pin_motor_down, OUTPUT);
     pinMode(pin_brake, OUTPUT);
+    pinMode(pin_emo, OUTPUT);
 
     digitalWrite(pin_motor_up, LOW);
     digitalWrite(pin_motor_down, LOW);
@@ -51,7 +52,6 @@ void IOManager::init_pins() {
 
     pinMode(pin_floor_1, INPUT_PULLUP);
     pinMode(pin_floor_2, INPUT_PULLUP);
-    pinMode(pin_emo, INPUT_PULLUP);
     pinMode(pin_no_power, INPUT_PULLUP);
     pinMode(pin_speed, INPUT_PULLUP);
     pinMode(pin_sling, INPUT_PULLUP);
@@ -78,6 +78,11 @@ void IOManager::motor_stop() {
 
 void IOManager::engage_brake(bool engage) {
     digitalWrite(pin_brake, engage ? HIGH : LOW);
+}
+
+void IOManager::emergency_stop() {
+    motor_stop();
+    digitalWrite(pin_emo, HIGH);
 }
 
 void IOManager::update_sensor() {
