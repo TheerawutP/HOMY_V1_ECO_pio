@@ -19,6 +19,7 @@ Orchestrator logic(&io);
 
 TaskHandle_t xElevatorHandle;
 QueueHandle_t xQueueCommand = NULL;
+QueueHandle_t xQueueSending = NULL;
 SemaphoreHandle_t dataMutex = NULL;
 
 void elevator_manager_task(void *pvParams)
@@ -82,7 +83,7 @@ void esp_now_manager_task(void *pvParams)
 {
     espnow.init();
     espnow_msg_t incoming_msg;
-
+    espnow_msg_t outgoing_msg;
     for (;;)
     {
         while (espnow.receive_message(&incoming_msg))
@@ -90,7 +91,10 @@ void esp_now_manager_task(void *pvParams)
             logic.process_remote_message(incoming_msg);
         }
 
-        // espnow.update();
+        while (xQueueReceive(xQueueSending, &outgoing_msg, 0) == pdPASS)
+        {
+            espnow.send_command((station_role_t)outgoing_msg.id, outgoing_msg.cmd);
+        }
 
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -115,6 +119,7 @@ void setup()
     Serial.begin(115200);
     dataMutex = xSemaphoreCreateMutex();
     xQueueCommand = xQueueCreate(10, sizeof(user_command));
+    xQueueSending = xQueueCreate(10, sizeof(espnow_msg_t));
 
     io.init_pins();
 
