@@ -230,40 +230,40 @@ void Orchestrator::process_remote_message(espnow_msg_t msg)
 
         if (current_cabin != last_cabin_frame)
         {
-            bool doorClosed = current_cabin & (1 << 0);
-            bool aim2 = current_cabin & (1 << 1);
-            bool aim1 = current_cabin & (1 << 2);
-            bool userStop = current_cabin & (1 << 3);
-            bool emergStop = current_cabin & (1 << 4);
+            bool is_door_closed = current_cabin & (1 << 0);
+            bool aim_2 = current_cabin & (1 << 1);
+            bool aim_1 = current_cabin & (1 << 2);
+            bool user_stop = current_cabin & (1 << 3);
+            bool emerg_stop = current_cabin & (1 << 4);
 
-            bool last_doorClosed = last_cabin_frame & (1 << 0);
-            bool last_aim2 = last_cabin_frame & (1 << 1);
-            bool last_aim1 = last_cabin_frame & (1 << 2);
-            bool last_userStop = last_cabin_frame & (1 << 3);
-            bool last_emergStop = last_cabin_frame & (1 << 4);
+            bool last_is_door_closed = last_cabin_frame & (1 << 0);
+            bool last_aim_2 = last_cabin_frame & (1 << 1);
+            bool last_aim_1 = last_cabin_frame & (1 << 2);
+            bool last_user_stop = last_cabin_frame & (1 << 3);
+            bool last_emerg_stop = last_cabin_frame & (1 << 4);
 
             // ----------------------------------------------------
             // user command -> get in queue
             // ----------------------------------------------------
-            if (aim1 && !last_aim1)
+            if (aim_1 && !last_aim_1)
             {
                 user_command cmd = {1, command_type_t::TRANSIT};
                 xQueueSend(xQueueCommand, &cmd, 0);
             }
-            if (aim2 && !last_aim2)
+            if (aim_2 && !last_aim_2)
             {
                 user_command cmd = {2, command_type_t::TRANSIT};
                 xQueueSend(xQueueCommand, &cmd, 0);
             }
-            if (userStop && !last_userStop)
+            if (user_stop && !last_user_stop)
             {
                 user_command cmd = {0, command_type_t::STOP};
                 xQueueSend(xQueueCommand, &cmd, 0);
             }
-            if (emergStop && !last_emergStop)
+            if (emerg_stop && !last_emerg_stop)
             {
                 user_command cmd = {0, command_type_t::EMG_STOP};
-                xQueueSend(xQueueCommand, &cmd, 0);
+                xQueueSendToFront(xQueueCommand, &cmd, 0);
             }
 
             // ----------------------------------------------------
@@ -271,9 +271,9 @@ void Orchestrator::process_remote_message(espnow_msg_t msg)
             // ----------------------------------------------------
             // eSetBits
 
-            if (doorClosed != last_doorClosed)
+            if (is_door_closed != last_is_door_closed)
             {
-                if (doorClosed)
+                if (is_door_closed)
                 {
                     xTaskNotify(xElevatorHandle, DOOR_IS_CLOSED, eSetBits);
                 }

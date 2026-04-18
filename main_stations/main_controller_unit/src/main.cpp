@@ -128,5 +128,52 @@ void setup()
 
 void loop()
 {
+if (Serial.available() > 0)
+    {
+        char incoming = Serial.read();
+        user_command cmd;
 
+        switch (incoming) {
+            case '1':
+                Serial.println(">> [TEST] go to floor 1");
+                cmd = {1, command_type_t::TRANSIT};
+                xQueueSend(xQueueCommand, &cmd, 0);
+                break;
+            case '2':
+                Serial.println(">> [TEST] go to floor 2");
+                cmd = {2, command_type_t::TRANSIT};
+                xQueueSend(xQueueCommand, &cmd, 0);
+                break;
+            case 's':
+            case 'S':
+                Serial.println(">> [TEST] user STOP");
+                cmd = {0, command_type_t::STOP};
+                xQueueSendToFront(xQueueCommand, &cmd, 0);
+                break;
+
+            // --- (Event) ---
+            
+            case 'e':
+            case 'E':
+                Serial.println(">> [TEST] user EMO!");
+                xTaskNotify(xElevatorHandle, EMO_IS_PRESSED, eSetBits);
+                break;
+            case 'x':
+            case 'X':
+                Serial.println(">> [TEST] sling cut!");
+                xTaskNotify(xElevatorHandle, SAFETY_BRAKE_ENGAGE, eSetBits);
+                break;
+            case 'o':
+            case 'O':
+                Serial.println(">> [TEST] door open");
+                xTaskNotify(xElevatorHandle, DOOR_IS_OPEN, eSetBits);
+                break;
+            case 'c':
+            case 'C':
+                Serial.println(">> [TEST] door closed");
+                xTaskNotify(xElevatorHandle, DOOR_IS_CLOSED, eSetBits);
+                break;
+
+        }
+    }
 }

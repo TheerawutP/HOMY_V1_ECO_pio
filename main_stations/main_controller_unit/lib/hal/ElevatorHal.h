@@ -39,7 +39,7 @@ public:
     bool status_sling;
     bool status_brake;
     
-    const uint8_t STABLE_THRESHOLD = 10;
+    const uint8_t STABLE_THRESHOLD = 6;
     
     uint8_t floor_1_counter = 0;
     uint8_t floor_2_counter = 0;
