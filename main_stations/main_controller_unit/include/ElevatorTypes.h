@@ -45,7 +45,6 @@ typedef struct
 {
     uint8_t id;
     uint16_t cmd;
-    uint16_t response;
 } espnow_msg_t;
 
 enum class station_role_t : uint8_t
@@ -112,3 +111,21 @@ const int num_rf_keys = sizeof(rf_keys) / sizeof(rf_keymap_t);
 #define EMO_IS_RELEASED       (1 << 4)
 #define VSG_ALARM_TRIGGER     (1 << 5)
 #define VSG_ALARM_CLEAR       (1 << 6)
+#define VTG_ALARM_TRIGGER     (1 << 7)
+#define VTG_ALARM_CLEAR       (1 << 8)
+
+
+#define OUT_EN_BRAKE (1 << 0)  // Bit 0: Enable safety sling
+#define OUT_EN_L_UP            (1 << 1)  // Bit 1: Light UP
+#define OUT_EN_L_DW            (1 << 2)  // Bit 2: Light DOWN
+#define OUT_EN_L_STOP          (1 << 3)  // Bit 3: Light STOP
+#define OUT_EN_L_EM            (1 << 4)  // Bit 4: Light EMERGENCY
+#define OUT_EN_LIGHT        (1 << 5)  // Bit 5: Enable Light
+#define OUT_EN_SOUND        (1 << 6)  // Bit 6: Enable Special Function
+#define OUT_CANCEL_BUSY     (1 << 7)  // Bit 7: Cancel BUSY state
+
+// Special Function Data (4-bit Payload)
+#define OUT_TRACK_BIT0      (1 << 8)  // Bit 8: SFunc BIT0 
+#define OUT_TRACK_BIT1      (1 << 9)  // Bit 9: SFunc BIT1
+#define OUT_TRACK_BIT2      (1 << 10) // Bit 10: SFunc BIT2
+#define OUT_TRACK_BIT3      (1 << 11) // Bit 11: SFunc BIT3
