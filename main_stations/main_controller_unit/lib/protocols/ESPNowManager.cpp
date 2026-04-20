@@ -57,6 +57,12 @@ bool EspNow::init()
     esp_now_register_recv_cb(on_data_recv_static);
     esp_now_register_send_cb(on_data_sent_static);
 
+    uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, broadcast_mac, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+
     Serial.println("[ESP-NOW] Initialized Successfully");
     return true;
 }
@@ -259,4 +265,17 @@ bool EspNow::get_latest_data(station_role_t role, espnow_msg_t *out_data)
 
 void EspNow::update()
 {
+    static unsigned long last_heartbeat = 0;
+
+    if (millis() - last_heartbeat >= 200)
+    {
+        espnow_msg_t hb_msg;
+        hb_msg.id = (uint8_t)station_role_t::MASTER;
+        hb_msg.cmd = 0;
+
+        uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+        esp_now_send(broadcast_mac, (uint8_t *)&hb_msg, sizeof(hb_msg));
+
+        last_heartbeat = millis();
+    }
 }

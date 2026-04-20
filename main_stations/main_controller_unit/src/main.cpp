@@ -11,6 +11,7 @@
 #include "ModbusManager.h"
 #include "RFManager.h"
 #include "ElevatorStorage.h"
+#include "SystemUIObserver.h"
 
 EspNow espnow;
 RFManager rf;
@@ -21,6 +22,8 @@ TaskHandle_t xElevatorHandle;
 QueueHandle_t xQueueCommand = NULL;
 QueueHandle_t xQueueSending = NULL;
 SemaphoreHandle_t dataMutex = NULL;
+
+SystemUIObserver *ui_observer;
 
 void elevator_manager_task(void *pvParams)
 {
@@ -69,11 +72,11 @@ void sensor_monitor_task(void *pvParams)
         // if (is_at_floor_1) xTaskNotify(xElevatorHandle, REACH_FLOOR_1, eSetValueWithOverwrite);
         // if (is_at_floor_2) xTaskNotify(xElevatorHandle, REACH_FLOOR_2, eSetValueWithOverwrite);
         // if (is_emo) xTaskNotify(xElevatorHandle, EMO_IS_PRESSED, eSetValueWithOverwrite);
-        
-        // if (is_sling_cut)
-        // {
-        //     xTaskNotify(xElevatorHandle, SAFETY_BRAKE_ENGAGE, eSetBits);
-        // }
+
+        if (is_sling_cut)
+        {
+            xTaskNotify(xElevatorHandle, SAFETY_BRAKE_ENGAGE, eSetBits);
+        }
 
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -85,7 +88,8 @@ void esp_now_manager_task(void *pvParams)
     espnow_msg_t incoming_msg;
     espnow_msg_t outgoing_msg;
     for (;;)
-    {
+    {   
+        espnow.update();
         while (espnow.receive_message(&incoming_msg))
         {
             logic.process_remote_message(incoming_msg);
@@ -101,13 +105,14 @@ void esp_now_manager_task(void *pvParams)
 }
 
 void rf_receiver_task(void *pvParams)
-{   rf.init(pin_rf_receiver);
+{
+    rf.init(pin_rf_receiver);
 
-    for(;;){
+    for (;;)
+    {
         rf.process_rf_cmd(xQueueCommand);
         vTaskDelay(pdMS_TO_TICKS(50));
     }
-
 }
 
 // void vModbusPolling(void *pvParams)
@@ -123,6 +128,9 @@ void setup()
 
     io.init_pins();
 
+    ui_observer = new SystemUIObserver(xQueueSending);
+    logic.attach_observer(ui_observer);
+
     xTaskCreate(elevator_manager_task, "ElevatorManager", 4096, NULL, 3, &xElevatorHandle);
     xTaskCreate(sensor_monitor_task, "SensorMonitor", 4096, NULL, 3, NULL);
     xTaskCreate(esp_now_manager_task, "EspNowManager", 4096, NULL, 3, NULL);
@@ -133,52 +141,52 @@ void setup()
 
 void loop()
 {
-if (Serial.available() > 0)
+    if (Serial.available() > 0)
     {
         char incoming = Serial.read();
         user_command cmd;
 
-        switch (incoming) {
-            case '1':
-                Serial.println(">> [TEST] go to floor 1");
-                cmd = {1, command_type_t::TRANSIT};
-                xQueueSend(xQueueCommand, &cmd, 0);
-                break;
-            case '2':
-                Serial.println(">> [TEST] go to floor 2");
-                cmd = {2, command_type_t::TRANSIT};
-                xQueueSend(xQueueCommand, &cmd, 0);
-                break;
-            case 's':
-            case 'S':
-                Serial.println(">> [TEST] user STOP");
-                cmd = {0, command_type_t::STOP};
-                xQueueSendToFront(xQueueCommand, &cmd, 0);
-                break;
+        switch (incoming)
+        {
+        case '1':
+            Serial.println(">> [TEST] go to floor 1");
+            cmd = {1, command_type_t::TRANSIT};
+            xQueueSend(xQueueCommand, &cmd, 0);
+            break;
+        case '2':
+            Serial.println(">> [TEST] go to floor 2");
+            cmd = {2, command_type_t::TRANSIT};
+            xQueueSend(xQueueCommand, &cmd, 0);
+            break;
+        case 's':
+        case 'S':
+            Serial.println(">> [TEST] user STOP");
+            cmd = {0, command_type_t::STOP};
+            xQueueSendToFront(xQueueCommand, &cmd, 0);
+            break;
 
             // --- (Event) ---
-            
-            case 'e':
-            case 'E':
-                Serial.println(">> [TEST] user EMO!");
-                xTaskNotify(xElevatorHandle, EMO_IS_PRESSED, eSetBits);
-                break;
-            case 'x':
-            case 'X':
-                Serial.println(">> [TEST] sling cut!");
-                xTaskNotify(xElevatorHandle, SAFETY_BRAKE_ENGAGE, eSetBits);
-                break;
-            case 'o':
-            case 'O':
-                Serial.println(">> [TEST] door open");
-                xTaskNotify(xElevatorHandle, DOOR_IS_OPEN, eSetBits);
-                break;
-            case 'c':
-            case 'C':
-                Serial.println(">> [TEST] door closed");
-                xTaskNotify(xElevatorHandle, DOOR_IS_CLOSED, eSetBits);
-                break;
 
+        case 'e':
+        case 'E':
+            Serial.println(">> [TEST] user EMO!");
+            xTaskNotify(xElevatorHandle, EMO_IS_PRESSED, eSetBits);
+            break;
+        case 'x':
+        case 'X':
+            Serial.println(">> [TEST] sling cut!");
+            xTaskNotify(xElevatorHandle, SAFETY_BRAKE_ENGAGE, eSetBits);
+            break;
+        case 'o':
+        case 'O':
+            Serial.println(">> [TEST] door open");
+            xTaskNotify(xElevatorHandle, DOOR_IS_OPEN, eSetBits);
+            break;
+        case 'c':
+        case 'C':
+            Serial.println(">> [TEST] door closed");
+            xTaskNotify(xElevatorHandle, DOOR_IS_CLOSED, eSetBits);
+            break;
         }
     }
 }
