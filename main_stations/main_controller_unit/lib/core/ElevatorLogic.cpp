@@ -3,11 +3,9 @@
 #include "Config.h"
 #include "ElevatorHal.h"
 #include "ElevatorTypes.h"
-#include <Arduino.h>
 
-extern QueueHandle_t xQueueCommand;
 extern TaskHandle_t xElevatorHandle;
-extern QueueHandle_t xQueueSending;
+// extern QueueHandle_t xQueueSending;
 
 Orchestrator::Orchestrator(ElevatorHal *hardwarePtr)
 
@@ -20,7 +18,46 @@ Orchestrator::Orchestrator(ElevatorHal *hardwarePtr)
 
     xSafetyEventGroup = xEventGroupCreate();
     xEventGroupClearBits(xSafetyEventGroup, 0xFFFFFF);
+    observer_count = 0;
 };
+
+void Orchestrator::attach_observer(IElevatorObserver *obs)
+{
+    if (observer_count < MAX_OBSERVERS)
+    {
+        observers[observer_count] = obs;
+        observer_count++;
+    }
+}
+
+void Orchestrator::notify_floor_changed()
+{
+    for (int i = 0; i < observer_count; i++)
+    {
+        observers[i]->on_floor_changed(data.current_floor);
+    }
+}
+
+void Orchestrator::notify_state_changed()
+{
+    if (data.current_state != last_notified_state || last_direction != last_notified_dir)
+    {
+        for (int i = 0; i < observer_count; i++)
+        {
+            observers[i]->on_state_changed(data.current_state, last_direction);
+        }
+        last_notified_state = data.current_state;
+        last_notified_dir = last_direction;
+    }
+}
+
+void Orchestrator::notify_event_triggered(uint32_t event_mask)
+{
+    for (int i = 0; i < observer_count; i++)
+    {
+        observers[i]->on_event_triggered(event_mask);
+    }
+}
 
 void Orchestrator::update_position()
 {
@@ -33,6 +70,7 @@ void Orchestrator::update_position()
     {
         data.current_floor = current_sensor_floor;
         data.btw_floor = false;
+        notify_floor_changed();
     }
     else
     {
@@ -53,6 +91,7 @@ void Orchestrator::execute_state_machine()
             data.current_state = elevator_state_t::IDLE;
             last_direction = elevator_direction_t::NONE;
             Serial.printf("[INFO] Reached target floor %d\n", data.target);
+            notify_state_changed();
             return;
         }
 
@@ -79,6 +118,8 @@ void Orchestrator::execute_state_machine()
         // Ensure motor is stopped and brake is engaged in IDLE
         hal->motor_stop();
     }
+
+    notify_state_changed();
 };
 
 void Orchestrator::stop_running()
@@ -86,6 +127,7 @@ void Orchestrator::stop_running()
     this->hal->motor_stop();
     data.target = 0;
     data.current_state = elevator_state_t::IDLE;
+    notify_state_changed();
 };
 
 elevator_direction_t Orchestrator::calculate_direction()
@@ -189,6 +231,7 @@ void Orchestrator::user_command_handle(user_command cmd)
 
 void Orchestrator::event_handle(uint32_t evt_mask)
 {
+    notify_event_triggered(evt_mask);
     // !!! high priority events that can cause safety issues should be handled first, regardless of current state
     espnow_msg_t outgoing_msg;
 
@@ -197,9 +240,10 @@ void Orchestrator::event_handle(uint32_t evt_mask)
         Serial.println("[CRITICAL] Sling cut detected! EMERGENCY state!");
         stop_running();
         data.current_state = elevator_state_t::EMERGENCY;
+        // notify_emergency();
 
-        outgoing_msg = {(uint8_t)station_role_t::CABIN, OUT_EN_BRAKE};
-        xQueueSend(xQueueSending, &outgoing_msg, 0);
+        // outgoing_msg = {(uint8_t)station_role_t::CABIN, OUT_EN_BRAKE};
+        // xQueueSend(xQueueSending, &outgoing_msg, 0);
     }
 
     // =========================================================
@@ -219,7 +263,7 @@ void Orchestrator::event_handle(uint32_t evt_mask)
                 data.current_state = elevator_state_t::IDLE;
 
                 user_command cmd = {2, command_type_t::TRANSIT};
-                xQueueSend(xQueueCommand, &cmd, 0);
+                this->user_command_handle(cmd);
             }
         }
 
@@ -240,7 +284,7 @@ void Orchestrator::event_handle(uint32_t evt_mask)
                 data.current_state = elevator_state_t::IDLE;
 
                 user_command cmd = {1, command_type_t::TRANSIT};
-                xQueueSend(xQueueCommand, &cmd, 0);
+                this->user_command_handle(cmd);
             }
         }
 
@@ -297,22 +341,22 @@ void Orchestrator::process_remote_message(espnow_msg_t msg)
             if (aim_1 && !last_aim_1)
             {
                 user_command cmd = {1, command_type_t::TRANSIT};
-                xQueueSend(xQueueCommand, &cmd, 0);
+                this->user_command_handle(cmd);
             }
             if (aim_2 && !last_aim_2)
             {
                 user_command cmd = {2, command_type_t::TRANSIT};
-                xQueueSend(xQueueCommand, &cmd, 0);
+                this->user_command_handle(cmd);
             }
             if (user_stop && !last_user_stop)
             {
                 user_command cmd = {0, command_type_t::STOP};
-                xQueueSend(xQueueCommand, &cmd, 0);
+                this->user_command_handle(cmd);
             }
             if (emerg_stop && !last_emerg_stop)
             {
                 user_command cmd = {0, command_type_t::EMG_STOP};
-                xQueueSendToFront(xQueueCommand, &cmd, 0);
+                this->user_command_handle(cmd);
             }
 
             // ----------------------------------------------------

@@ -104,6 +104,7 @@ const rf_keymap_t rf_keys[] = {
 
 const int num_rf_keys = sizeof(rf_keys) / sizeof(rf_keymap_t);
 
+//event bitmask
 #define SAFETY_BRAKE_ENGAGE   (1 << 0)
 #define DOOR_IS_OPEN          (1 << 1)
 #define DOOR_IS_CLOSED        (1 << 2)
@@ -129,6 +130,7 @@ const int num_rf_keys = sizeof(rf_keys) / sizeof(rf_keymap_t);
 #define OUT_TRACK_BIT1      (1 << 9)  // Bit 9: SFunc BIT1
 #define OUT_TRACK_BIT2      (1 << 10) // Bit 10: SFunc BIT2
 #define OUT_TRACK_BIT3      (1 << 11) // Bit 11: SFunc BIT3
+#define OUT_TRACK_BIT4      (1 << 12)
 
 // block moving 
 #define DOOR_OPEN_BIT (1 << 0)  
@@ -144,3 +146,22 @@ const int num_rf_keys = sizeof(rf_keys) / sizeof(rf_keymap_t);
 // block dir group (true = dont allowed)
 #define BLOCK_UP_MASK (VTG_BIT | EMG_STOP_BIT | DOOR_OPEN_BIT)
 #define BLOCK_DOWN_MASK (SAFETY_BRAKE_BIT | VSG_BIT | EMG_STOP_BIT | DOOR_OPEN_BIT)
+
+
+#define SF_0000 0
+#define SF_1001 1  // going up
+#define SF_1002 2  // going dw
+#define SF_1003 3  // reaching
+#define SF_1004 4  // obstable under cabin
+#define SF_1005 5  // beware pinch
+#define SF_1006 6  // no power go to floor1
+#define SF_1007 7  // overweight
+#define SF_1008 8  // safety brake
+#define SF_1009 9  // please close the door
+#define SF_1010 10 // elevator ready to use
+#define SF_1011 11 // cant connect to wifi
+#define SF_1012 12 // system going to reset
+#define SF_1013 13 // wait for modbus
+#define SF_1014 14 // reach1
+#define SF_1015 15 // reach2
+#define SF_1016 16 // emerg stop

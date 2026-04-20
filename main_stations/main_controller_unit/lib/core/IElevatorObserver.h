@@ -8,5 +8,6 @@ public:
     
     virtual void on_floor_changed(uint8_t new_floor) = 0;
     virtual void on_state_changed(elevator_state_t new_state, elevator_direction_t dir) = 0;
-    virtual void on_emergency_triggered() = 0;
+    virtual void on_event_triggered(uint32_t event_mask) = 0;
+    
 };
