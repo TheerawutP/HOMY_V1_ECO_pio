@@ -11,7 +11,7 @@
 #include "ModbusManager.h"
 #include "RFManager.h"
 #include "ElevatorStorage.h"
-#include "SystemUIObserver.h"
+#include "SystemObserver.h"
 
 EspNow espnow;
 RFManager rf;
@@ -23,7 +23,7 @@ QueueHandle_t xQueueCommand = NULL;
 QueueHandle_t xQueueSending = NULL;
 SemaphoreHandle_t dataMutex = NULL;
 
-SystemUIObserver *ui_observer;
+CabinObserver *cabin_observer;
 
 void elevator_manager_task(void *pvParams)
 {
@@ -128,8 +128,8 @@ void setup()
 
     io.init_pins();
 
-    ui_observer = new SystemUIObserver(xQueueSending);
-    logic.attach_observer(ui_observer);
+    cabin_observer = new CabinObserver(xQueueSending);
+    logic.attach_observer(cabin_observer);
 
     xTaskCreate(elevator_manager_task, "ElevatorManager", 4096, NULL, 3, &xElevatorHandle);
     xTaskCreate(sensor_monitor_task, "SensorMonitor", 4096, NULL, 3, NULL);

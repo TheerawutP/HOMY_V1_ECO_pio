@@ -2,13 +2,13 @@
 #include "IElevatorObserver.h"
 #include "arduino.h"
 
-class SystemUIObserver : public IElevatorObserver
+class CabinObserver : public IElevatorObserver
 {
 private:
     QueueHandle_t txQueue;
 
 public:
-    SystemUIObserver(QueueHandle_t queue) : txQueue(queue) {}
+    CabinObserver(QueueHandle_t queue) : txQueue(queue) {}
 
     void on_floor_changed(uint8_t new_floor) override
     {
@@ -80,3 +80,56 @@ public:
         }
     }
 };
+
+class WebSocketObserver : public IElevatorObserver
+{
+private:
+    QueueHandle_t txQueue;
+
+public:
+    WebSocketObserver(QueueHandle_t queue) : txQueue(queue) {}
+
+    void on_floor_changed(uint8_t new_floor) override
+    {   
+        // xQueueSend(txQueue, &msg, 0);
+    }
+
+    void on_state_changed(elevator_state_t new_state, elevator_direction_t dir) override
+    {
+
+        // xQueueSend(txQueue, &msg, 0);
+        
+    }
+
+    void on_event_triggered(uint32_t event_mask) override
+    {
+        // xQueueSend(txQueue, &msg, 0);
+    }
+};
+
+
+class MqttObserver : public IElevatorObserver
+{
+private:
+    QueueHandle_t txQueue;
+public:
+    MqttObserver(QueueHandle_t queue) : txQueue(queue) {}
+
+    void on_floor_changed(uint8_t new_floor) override
+    {
+        // xQueueSend(txQueue, &msg, 0);
+    }
+
+    void on_state_changed(elevator_state_t new_state, elevator_direction_t dir) override
+    {
+
+        // xQueueSend(txQueue, &msg, 0);
+        
+    }
+
+    void on_event_triggered(uint32_t event_mask) override
+    {
+        // xQueueSend(txQueue, &msg, 0);
+    }
+};
+

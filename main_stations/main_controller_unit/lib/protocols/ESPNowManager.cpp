@@ -63,6 +63,11 @@ bool EspNow::init()
     peerInfo.channel = 0;
     peerInfo.encrypt = false;
 
+    if (esp_now_add_peer(&peerInfo) != ESP_OK)
+    {
+        Serial.println("[ESP-NOW] Failed to add Broadcast Peer");
+    }
+    
     Serial.println("[ESP-NOW] Initialized Successfully");
     return true;
 }

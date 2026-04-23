@@ -1,10 +1,14 @@
-﻿#include <WiFi.h>
+﻿// main.cpp
+#include "config.h"
+#include "elevatorTypes.h"
+#include "elevatorStorage.h"
+#include <WiFi.h>
 #include "Arduino.h"
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include <SPIFFS.h>
 #include <AsyncJson.h>
-#include "wifi_credentials.h" 
+#include "wifi_credentials.h"
 #include "WebSocketsServer.h"
 #include "DNSServer.h"
 #include <PubSubClient.h>
@@ -13,161 +17,8 @@
 #include "SPIFFS.h"
 #include <ModbusMaster.h>
 #include <Preferences.h>
-#include "elevatorTypes.h"
-#include "elevatorStorage.h"
 #include <esp_now.h>
-
-#define PIN_RX 16
-#define PIN_TX 17
-#define WIFI_READY 13
-#define RFReceiver 23
-#define floorSensor1 32
-#define floorSensor2 33
-#define R_UP 19        // Relay UP
-#define R_DW 18        // Relay DOWN
-#define R_POWER_CUT 15 // Relay 4
-#define BRK 5          // brake
-#define NoPower 25
-#define safetySling 26
-#define speedGovernor 14
-#define EMO 21 // emergency stop
-
-// #define CS 21 //direct to 3.3v
-// #define RST_SYS 4
-// #define MB_RX 26
-// #define MB_TX 27
-#define MASTER_ID 100
-
-#define toFloor1 174744
-#define toFloor2 174740
-// #define POWER_CUT 174738
-#define STOP 174737
-#define INVERTER_DI_STOP 992
-#define INVERTER_DI_EMO 5092
-
-// remote set2
-#define toFloor1_2 12418580
-#define toFloor2_2 12418584
-#define STOP_2 12418578
-#define EM_remote_2 12418577
-
-// remote set3
-#define toFloor1_3 16003636
-#define toFloor2_3 16003640
-#define STOP_3 16003634
-#define EM_remote_3 16003633
-
-// remote set4
-#define toFloor1_4 16751236
-#define toFloor2_4 16751240
-#define STOP_4 16751234
-#define EM_remote_4 16751233
-
-typedef enum
-{
-  BTN_TO_FLOOR_1,
-  BTN_TO_FLOOR_2,
-  BTN_TO_FLOOR_3,
-  BTN_TO_FLOOR_4,
-  BTN_TO_FLOOR_5,
-  BTN_TO_FLOOR_6,
-  BTN_STOP,
-  BTN_EMERGENCY,
-  BTN_UNKNOWN
-} RF_ButtonType;
-
-typedef struct
-{
-  unsigned long rfCode;
-  RF_ButtonType type;
-} RF_KeyMap;
-
-const RF_KeyMap rfKeys[] = {
-    // --- set 1 ---
-    // {toFloor1, BTN_TO_FLOOR_1},
-    // {toFloor2, BTN_TO_FLOOR_2},
-    // {STOP, BTN_STOP},
-    // {EM_remote_1, BTN_EMERGENCY},
-
-    // --- set 2 ---
-    {toFloor1_2, BTN_TO_FLOOR_1},
-    {toFloor2_2, BTN_TO_FLOOR_2},
-    {STOP_2, BTN_STOP},
-    // {EM_remote_2, BTN_EMERGENCY},
-
-    // --- set 3 ---
-    {toFloor1_3, BTN_TO_FLOOR_1},
-    {toFloor2_3, BTN_TO_FLOOR_2},
-    {STOP_3, BTN_STOP},
-    // {EM_remote_3, BTN_EMERGENCY},
-
-    // --- set 4 ---
-    {toFloor1_4, BTN_TO_FLOOR_1},
-    {toFloor2_4, BTN_TO_FLOOR_2},
-    {STOP_4, BTN_STOP}
-    // {EM_remote_4, BTN_EMERGENCY},
-};
-
-const int numRfKeys = sizeof(rfKeys) / sizeof(RF_KeyMap);
-
-#define SF_0000 0
-#define SF_1001 1  // going up
-#define SF_1002 2  // going dw
-#define SF_1003 3  // reaching
-#define SF_1004 4  // obstable under cabin
-#define SF_1005 5  // beware pinch
-#define SF_1006 6  // no power go to floor1
-#define SF_1007 7  // overweight
-#define SF_1008 8  // safety brake
-#define SF_1009 9  // please close the door
-#define SF_1010 10 // elevator ready to use
-#define SF_1011 11 // cant connect to wifi
-#define SF_1012 12 // system going to reset
-#define SF_1013 13 // wait for modbus
-#define SF_1014 14 // reach1
-#define SF_1015 15 // reach2
-#define SF_1016 16 // emerg stop
-
-// both dir block
-#define MODBUS_DIS_BIT (1 << 0) // 0x01
-#define DOOR_OPEN_BIT (1 << 1)  // 0x02
-#define EMERG_BIT (1 << 2)      // 0x04
-
-// block go up
-#define VTG_BIT (1 << 3) // 0x08
-
-// block go down
-#define SAFETY_BRAKE_BIT (1 << 4) // 0x10
-#define VSG_BIT (1 << 5)          // 0x20
-
-// block dir group (true = dont allowed)
-#define BLOCK_UP_MASK (VTG_BIT | EMERG_BIT | DOOR_OPEN_BIT | MODBUS_DIS_BIT)
-#define BLOCK_DOWN_MASK (SAFETY_BRAKE_BIT | VSG_BIT | EMERG_BIT | DOOR_OPEN_BIT | MODBUS_DIS_BIT)
-
-// ms timings
-// #define DEBOUNCE_MS 1000
-// #define BRAKE_MS 2000
-#define WAIT_TO_RUNNING_MS 700
-// #define POWER_CUT_MS 3000
-
-uint8_t torque_rated_up = 80;
-uint8_t torque_rated_down = 40; // both in percentage
-
-volatile uint32_t modbusDelayTime = 50;
-volatile uint32_t modbusRetryTime = 20;
-
-volatile uint8_t overSpeed_counter = 0;
-volatile uint32_t lastTimeCount = 0;
-
-// const uint32_t minSpeedPeriod = 1000;
-const uint32_t upper_bound_speed_interval = 800;
-const uint32_t lower_bound_speed_interval = 1000;
-const uint32_t overSpeed_threshold = 2;
-
-const uint8_t MIN_FLOOR = 1;
-uint8_t MAX_FLOOR = 2;
-
-volatile uint16_t writeFrame[5][16]; // slave id, write reg
+#include <esp_wifi.h>
 
 const char *mqtt_broker = "kit.flinkone.com";
 const int mqtt_port = 1883; // unencrypt
@@ -176,6 +27,24 @@ const char *UT_case = "/UT_55555";
 const char *system_status = "/sys_v2";
 const char *elevator_status = "/ele_status";
 const char *inverter_status = "/inv_status";
+
+uint32_t modbusDelayTime = 50;
+uint32_t modbusRetryTime = 20;
+
+struct_message recvData;
+struct_message sendData;
+
+volatile bool isSendComplete = false;
+volatile esp_now_send_status_t lastSendStatus;
+unsigned long lastCabinSeen = 0;
+unsigned long lastVsgSeen = 0;
+unsigned long lastVtgSeen = 0;
+
+volatile uint16_t writeFrame[5][16];
+
+volatile uint8_t overSpeed_counter = 0;
+volatile uint32_t lastTimeCount = 0;
+
 char mqtt_topic[64];
 
 WiFiClient wifiClient;
@@ -349,10 +218,12 @@ static void applyEspNowPeersForStations()
   esp_now_del_peer(VTG_MAC);
 
   esp_now_peer_info_t peer = {};
-
-  memcpy(peer.peer_addr, CABIN_MAC, 6);
   peer.channel = 0;
   peer.encrypt = false;
+
+  peer.ifidx = WIFI_IF_STA;
+
+  memcpy(peer.peer_addr, CABIN_MAC, 6);
   esp_now_add_peer(&peer);
 
   memcpy(peer.peer_addr, VSG_MAC, 6);
@@ -362,8 +233,14 @@ static void applyEspNowPeersForStations()
   esp_now_add_peer(&peer);
 }
 
-// Forward declaration (implemented later in this file)
-void sendWebsocketAlert(const char *alertType, const char *message);
+void sendWebsocketAlert(const char *alertType, const char *message)
+{
+  char alertBuf[128];
+  snprintf(alertBuf, sizeof(alertBuf), "{\"alert\":\"%s\", \"msg\":\"%s\"}", alertType, message);
+
+  m_websocketserver.broadcastTXT(alertBuf, strlen(alertBuf));
+  Serial.printf(">> Sent Alert to UI: %s\n", message);
+}
 
 static void updateWifiChannel(uint8_t newChannel)
 {
@@ -389,26 +266,6 @@ static void updateWifiChannel(uint8_t newChannel)
   applyEspNowPeersForStations();
   sendWebsocketAlert("INFO", "WiFi channel updated (ESP-NOW peers re-applied).");
 }
-typedef struct struct_message
-{
-  uint8_t fromID;
-  uint16_t commandFrame;
-  uint16_t responseFrame;
-  bool shouldResponse;
-} struct_message;
-
-struct_message recvData;
-struct_message sendData;
-
-volatile bool isSendComplete = false;
-volatile esp_now_send_status_t lastSendStatus;
-
-// Heartbeat and Pairing
-#define HEARTBEAT_INTERVAL 200
-#define HEARTBEAT_TIMEOUT 10000
-unsigned long lastCabinSeen = 0;
-unsigned long lastVsgSeen = 0;
-unsigned long lastVtgSeen = 0;
 
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
 {
@@ -470,14 +327,6 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
   lastSendStatus = status;
   isSendComplete = true;
 }
-
-
-// while sleep param
-
-// other helpers
-
-// movement helpers
-// update elevator val helpers
 
 inline void ROTATE(direction_t dir)
 {
@@ -587,7 +436,7 @@ void emoDeactivate()
   if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE)
   {
     writeBit(cabinState.writtenFrame[1], 4, false);
-        sendCabinCommand(cabinState.writtenFrame[1]);
+    sendCabinCommand(cabinState.writtenFrame[1]);
 
     xSemaphoreGive(dataMutex);
   }
@@ -1191,6 +1040,20 @@ void handle_websocket_text(uint8_t *payload)
 
   JsonObject m_JsonObject_from_payload = m_JSONdoc_from_payload.as<JsonObject>();
 
+  if (m_JSONdoc_from_payload.containsKey("reset_mcu"))
+  {
+    if (m_JSONdoc_from_payload["reset_mcu"] == true)
+    {
+      Serial.println(">> WebCommand: Reset MCU Request Received.");
+
+      // ส่งแจ้งเตือนกลับไปที่หน้าเว็บก่อนดับ
+      sendWebsocketAlert("WARNING", "MCU is restarting...");
+
+      delay(500);
+      ESP.restart();
+    }
+  }
+
   bool anyMacUpdated = false;
   uint8_t tmpMac[6];
 
@@ -1288,15 +1151,6 @@ void handle_websocket_text(uint8_t *payload)
     applyEspNowPeersForStations();
     // sendWebsocketAlert("INFO", "ESP-NOW station MACs updated & saved.");
   }
-}
-
-void sendWebsocketAlert(const char *alertType, const char *message)
-{
-  char alertBuf[128];
-  snprintf(alertBuf, sizeof(alertBuf), "{\"alert\":\"%s\", \"msg\":\"%s\"}", alertType, message);
-
-  m_websocketserver.broadcastTXT(alertBuf, strlen(alertBuf));
-  Serial.printf(">> Sent Alert to UI: %s\n", message);
 }
 
 void onWebSocketEvent(uint8_t num,
@@ -1595,10 +1449,6 @@ void configureserver()
   server.begin();
 }
 
-//
-//
-//
-
 void getDir(uint8_t target, transitCommand_t *cmd)
 {
   if (elevator.pos != target)
@@ -1625,8 +1475,7 @@ void getDir(uint8_t target, transitCommand_t *cmd)
         writeBit(cabinState.writtenFrame[1], 3, false);
         writeBit(cabinState.writtenFrame[1], 2, false);
         writeBit(cabinState.writtenFrame[1], 1, true);
-                sendCabinCommand(cabinState.writtenFrame[1]);
-
+        sendCabinCommand(cabinState.writtenFrame[1]);
       }
       else
       {
@@ -1635,8 +1484,7 @@ void getDir(uint8_t target, transitCommand_t *cmd)
         writeBit(cabinState.writtenFrame[1], 3, false);
         writeBit(cabinState.writtenFrame[1], 2, true);
         writeBit(cabinState.writtenFrame[1], 1, false);
-                sendCabinCommand(cabinState.writtenFrame[1]);
-
+        sendCabinCommand(cabinState.writtenFrame[1]);
       }
       xSemaphoreGive(dataMutex);
     }
@@ -1672,7 +1520,6 @@ void getDir(uint8_t target, transitCommand_t *cmd)
           writeBit(cabinState.writtenFrame[1], 2, false);
           writeBit(cabinState.writtenFrame[1], 1, true);
           sendCabinCommand(cabinState.writtenFrame[1]);
-
         }
         else
         {
@@ -1682,7 +1529,6 @@ void getDir(uint8_t target, transitCommand_t *cmd)
           writeBit(cabinState.writtenFrame[1], 2, true);
           writeBit(cabinState.writtenFrame[1], 1, false);
           sendCabinCommand(cabinState.writtenFrame[1]);
-
         }
         xSemaphoreGive(dataMutex);
       }
@@ -1726,7 +1572,7 @@ void checkUpdatePos(uint8_t reachedFloorNum)
         writeBit(cabinState.writtenFrame[1], 2, false);
         writeBit(cabinState.writtenFrame[1], 1, false);
         writeBit(cabinState.writtenFrame[1], 0, false);
-                  sendCabinCommand(cabinState.writtenFrame[1]);
+        sendCabinCommand(cabinState.writtenFrame[1]);
 
         xSemaphoreGive(dataMutex);
       }
@@ -1849,8 +1695,7 @@ void vOchestrator(void *pvParams)
             writeBit(cabinState.writtenFrame[1], 3, true);
             writeBit(cabinState.writtenFrame[1], 2, false);
             writeBit(cabinState.writtenFrame[1], 1, false);
-                      sendCabinCommand(cabinState.writtenFrame[1]);
-
+            sendCabinCommand(cabinState.writtenFrame[1]);
           }
           xSemaphoreGive(dataMutex);
         }
@@ -1896,7 +1741,7 @@ void vOchestrator(void *pvParams)
           writeBit(cabinState.writtenFrame[1], 3, true);
           writeBit(cabinState.writtenFrame[1], 2, false);
           writeBit(cabinState.writtenFrame[1], 1, false);
-                    sendCabinCommand(cabinState.writtenFrame[1]);
+          sendCabinCommand(cabinState.writtenFrame[1]);
 
           xSemaphoreGive(dataMutex);
         }
@@ -1968,7 +1813,7 @@ void vOchestrator(void *pvParams)
           writeBit(cabinState.writtenFrame[1], 3, false);
           writeBit(cabinState.writtenFrame[1], 2, false);
           writeBit(cabinState.writtenFrame[1], 1, false);
-                    sendCabinCommand(cabinState.writtenFrame[1]);
+          sendCabinCommand(cabinState.writtenFrame[1]);
 
           xSemaphoreGive(dataMutex);
         }
@@ -1988,7 +1833,7 @@ void vOchestrator(void *pvParams)
           writeFrameDFPlayer(SF_1006, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           writeBit(cabinState.writtenFrame[1], 2, true);
           writeBit(cabinState.writtenFrame[1], 1, false);
-                    sendCabinCommand(cabinState.writtenFrame[1]);
+          sendCabinCommand(cabinState.writtenFrame[1]);
 
           xSemaphoreGive(dataMutex);
         }
@@ -2010,7 +1855,7 @@ void vOchestrator(void *pvParams)
           writeFrameDFPlayer(SF_1014, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           writeBit(cabinState.writtenFrame[1], 2, false);
           writeBit(cabinState.writtenFrame[1], 1, false);
-                    sendCabinCommand(cabinState.writtenFrame[1]);
+          sendCabinCommand(cabinState.writtenFrame[1]);
 
           xSemaphoreGive(dataMutex);
         }
@@ -2027,7 +1872,7 @@ void vOchestrator(void *pvParams)
           writeFrameDFPlayer(SF_1015, cabinState.writtenFrame[1], cabinState.isBusy, 6);
           writeBit(cabinState.writtenFrame[1], 2, false);
           writeBit(cabinState.writtenFrame[1], 1, false);
-                    sendCabinCommand(cabinState.writtenFrame[1]);
+          sendCabinCommand(cabinState.writtenFrame[1]);
 
           xSemaphoreGive(dataMutex);
         }
@@ -2064,7 +1909,7 @@ void vOchestrator(void *pvParams)
           writeBit(cabinState.writtenFrame[1], 2, false);
           writeBit(cabinState.writtenFrame[1], 1, true);
           writeBit(cabinState.writtenFrame[1], 0, true);
-                    sendCabinCommand(cabinState.writtenFrame[1]);
+          sendCabinCommand(cabinState.writtenFrame[1]);
 
           xSemaphoreGive(dataMutex);
         }
@@ -2153,7 +1998,7 @@ void vOchestrator(void *pvParams)
             writeBit(cabinState.writtenFrame[1], 3, true);
             writeBit(cabinState.writtenFrame[1], 2, false);
             writeBit(cabinState.writtenFrame[1], 1, false);
-          sendCabinCommand(cabinState.writtenFrame[1]);
+            sendCabinCommand(cabinState.writtenFrame[1]);
 
             xSemaphoreGive(dataMutex);
           }
@@ -2176,7 +2021,7 @@ void vOchestrator(void *pvParams)
             writeBit(cabinState.writtenFrame[1], 3, true);
             writeBit(cabinState.writtenFrame[1], 2, false);
             writeBit(cabinState.writtenFrame[1], 1, false);
-          sendCabinCommand(cabinState.writtenFrame[1]);
+            sendCabinCommand(cabinState.writtenFrame[1]);
 
             xSemaphoreGive(dataMutex);
           }
@@ -2332,6 +2177,7 @@ void vPollingModbusMaster(void *pvParams)
   uint16_t NUM_READ_CABIN = 1;
   uint16_t NUM_READ_HALL = 1;
   uint16_t NUM_READ_VSG = 1;
+
   modbusStation_t currStation = INVERTER_STA;
   uint16_t pollingData[5][16];
   uint8_t result;
@@ -2351,6 +2197,17 @@ void vPollingModbusMaster(void *pvParams)
       switch (currStation)
       {
       case INVERTER_STA:
+        if (readDataFrom(INVERTER_ID, FIRST_REG_INVERTER, NUM_READ_INVERTER, pollingData[INVERTER_ID]))
+        {
+          if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE)
+          {
+            for (int i = 0; i < 10; i++)
+            {
+              inverterState.raw_regs[i] = pollingData[INVERTER_ID][i];
+            }
+            xSemaphoreGive(dataMutex);
+          }
+        }
         currStation = CABIN_STA;
         break;
 
@@ -2425,7 +2282,7 @@ void vESP_NOW(void *pvParams)
     if (xQueueReceive(cabinTxQueue, &cabinFrame, 0) == pdPASS)
     {
       uint8_t retryCount = 0;
-      const uint8_t MAX_RETRIES = 3; 
+      const uint8_t MAX_RETRIES = 3;
       bool sendSuccess = false;
 
       while (retryCount < MAX_RETRIES && !sendSuccess)
@@ -2435,17 +2292,17 @@ void vESP_NOW(void *pvParams)
         sendData.responseFrame = 0;
         sendData.shouldResponse = false;
 
-        isSendComplete = false; //reset flag before sending
+        isSendComplete = false; // reset flag before sending
         result = esp_now_send(CABIN_MAC, (uint8_t *)&sendData, sizeof(sendData));
 
         if (result == ESP_OK)
         {
           // timeout 100ms
           uint32_t waitTime = 0;
-          while (!isSendComplete && waitTime < 100)
+          while (!isSendComplete && waitTime < 20)
           {
-            vTaskDelay(pdMS_TO_TICKS(5));
-            waitTime += 5;
+            vTaskDelay(pdMS_TO_TICKS(2));
+            waitTime += 2;
           }
 
           // check send status
@@ -2794,14 +2651,14 @@ void vPollingNoPower(void *pvParams)
     if (currentIsNoPower && !lastIsNoPower)
     {
       Serial.println(">> Event: Power LOST!");
-      // xTaskNotify(xOchestratorHandle, NO_POWER, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+      xTaskNotify(xOchestratorHandle, NO_POWER, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
       lastIsNoPower = true;
     }
 
     else if (currentIsPowerOK && lastIsNoPower)
     {
       Serial.println(">> Event: Power RESTORED!");
-      // xTaskNotify(xOchestratorHandle, POWER_RESTORED, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
+      xTaskNotify(xOchestratorHandle, POWER_RESTORED, eSetValueWithOverwrite); // [DBG] disabled for normal up/down test
       lastIsNoPower = false;
     }
 
@@ -3126,51 +2983,52 @@ void vStatusLogger(void *pvParams)
 
 void vUpdatePage(void *pvParams)
 {
-  static char jsonBuf[256];
+  static char jsonBuf[512];
+  unsigned long lastSendTime = 0;
+  const unsigned long SEND_INTERVAL = 100;
 
   for (;;)
   {
 
     m_websocketserver.loop();
 
-    // uint8_t pos;
-    // status_t statusCopy;
+    if (millis() - lastSendTime >= SEND_INTERVAL)
+    {
+      lastSendTime = millis();
 
-    // pos = POS;
+      uint16_t inv_raw[10] = {0};
+      if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
+      {
+        for (int i = 0; i < 10; i++)
+          inv_raw[i] = inverterState.raw_regs[i];
+        xSemaphoreGive(dataMutex);
+      }
 
-    // if (xSemaphoreTake(hasChangedMutex, pdMS_TO_TICKS(5)) == pdTRUE)
-    // {
-    //   statusCopy = publish_status;
-    //   xSemaphoreGive(hasChangedMutex);
-    // }
-    // else
-    // {
-    //   vTaskDelay(pdMS_TO_TICKS(100));
-    //   continue;
-    // }
+      snprintf(
+          jsonBuf,
+          sizeof(jsonBuf),
+          "{\"floorValue\":%d,"
+          "\"state\":%d,"
+          "\"up\":%s,"
+          "\"down\":%s,"
+          "\"targetFloor\":%d,"
+          "\"btwFloor\":%s,"
+          "\"emo\":%s,"
+          "\"inv_raw\":[%u,%u,%u,%u,%u,%u,%u,%u,%u,%u]}", // แทรก Array ตรงนี้
+          elevator.pos,
+          elevator.state,
+          (elevator.dir == DIR_UP) ? "true" : "false",
+          (elevator.dir == DIR_DOWN) ? "true" : "false",
+          elevator.target,
+          (elevator.btwFloor) ? "true" : "false",
+          (digitalRead(EMO) == HIGH) ? "true" : "false",
+          inv_raw[0], inv_raw[1], inv_raw[2], inv_raw[3], inv_raw[4],
+          inv_raw[5], inv_raw[6], inv_raw[7], inv_raw[8], inv_raw[9]);
 
-    snprintf(
-        jsonBuf,
-        sizeof(jsonBuf),
-        "{\"floorValue\":%d,"
-        "\"state\":%d,"
-        "\"up\":%s,"
-        "\"down\":%s,"
-        "\"targetFloor\":%d,"
-        "\"btwFloor\":%s,"
-        "\"emo\":%s}",
-        elevator.pos,
-        elevator.state,
-        (elevator.dir == DIR_UP) ? "true" : "false",
-        (elevator.dir == DIR_DOWN) ? "true" : "false",
-        elevator.target,
-        (elevator.btwFloor) ? "true" : "false",
-        (digitalRead(EMO) == HIGH) ? "true" : "false" //
-    );
+      m_websocketserver.broadcastTXT(jsonBuf, strlen(jsonBuf));
+    }
 
-    m_websocketserver.broadcastTXT(jsonBuf, strlen(jsonBuf));
-
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
 
@@ -3243,6 +3101,8 @@ void setup()
   // wifiClient.setInsecure();
   Serial.println(WiFi.localIP());
   setupMQTT();
+
+  esp_wifi_set_ps(WIFI_PS_NONE);
 
   if (esp_now_init() != ESP_OK)
   {
