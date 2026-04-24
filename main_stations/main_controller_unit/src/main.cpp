@@ -3,7 +3,7 @@
 #include "Config.h"
 #include "ElevatorTypes.h"
 
-#include "MqttManager.h"
+#include "WebServerManager.h"
 #include "WifiPortalManager.h"
 #include "ElevatorLogic.h"
 #include "ElevatorHal.h"
@@ -130,7 +130,8 @@ void setup()
     }
 
     wifi_portal_init();
-
+    websocket_init();
+    
     dataMutex = xSemaphoreCreateMutex();
     xQueueCommand = xQueueCreate(10, sizeof(user_command));
     xQueueSending = xQueueCreate(10, sizeof(espnow_msg_t));

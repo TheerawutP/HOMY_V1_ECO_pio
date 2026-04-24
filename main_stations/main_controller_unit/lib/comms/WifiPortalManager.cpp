@@ -23,7 +23,7 @@ void wifi_portal_init()
     run_wifi_portal();
   }
 
-  MDNS.begin("ximplex_websocket");
+  MDNS.begin("ximplex_ui");
   Serial.println(WiFi.localIP());
 }
 
