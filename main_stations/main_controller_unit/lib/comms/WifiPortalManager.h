@@ -1,6 +1,5 @@
 // WifiPortalManager.h
 #pragma once
-#include "CommTypes.h"
 #include "WebSocketsServer.h"
 #include <WiFi.h>
 #include <ESPmDNS.h>
@@ -8,6 +7,9 @@
 #include "FS.h"
 #include "SPIFFS.h"
 #include <AsyncJson.h>
+
+
+void wifi_portal_init();
 
 boolean wifi_connect_attempt(String ssid, String password);
 
@@ -23,4 +25,3 @@ void get_wifi_scan_json(AsyncWebServerRequest *request);
 
 void handle_get_save_secret_json(AsyncWebServerRequest *request);
 
-void run_wifi_portal();

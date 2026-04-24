@@ -4,7 +4,7 @@
 #include "ElevatorTypes.h"
 
 #include "MqttManager.h"
-#include "WebManager.h"
+#include "WifiPortalManager.h"
 #include "ElevatorLogic.h"
 #include "ElevatorHal.h"
 #include "ESPNowManager.h"
@@ -73,10 +73,10 @@ void sensor_monitor_task(void *pvParams)
         // if (is_at_floor_2) xTaskNotify(xElevatorHandle, REACH_FLOOR_2, eSetValueWithOverwrite);
         // if (is_emo) xTaskNotify(xElevatorHandle, EMO_IS_PRESSED, eSetValueWithOverwrite);
 
-        if (is_sling_cut)
-        {
-            xTaskNotify(xElevatorHandle, SAFETY_BRAKE_ENGAGE, eSetBits);
-        }
+        // if (is_sling_cut)
+        // {
+        //     xTaskNotify(xElevatorHandle, SAFETY_BRAKE_ENGAGE, eSetBits);
+        // }
 
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -88,7 +88,7 @@ void esp_now_manager_task(void *pvParams)
     espnow_msg_t incoming_msg;
     espnow_msg_t outgoing_msg;
     for (;;)
-    {   
+    {
         espnow.update();
         while (espnow.receive_message(&incoming_msg))
         {
@@ -122,6 +122,15 @@ void rf_receiver_task(void *pvParams)
 void setup()
 {
     Serial.begin(115200);
+
+    if (!SPIFFS.begin(true))
+    {
+        Serial.println("An Error has occurred while mounting SPIFFS");
+        return;
+    }
+
+    wifi_portal_init();
+
     dataMutex = xSemaphoreCreateMutex();
     xQueueCommand = xQueueCreate(10, sizeof(user_command));
     xQueueSending = xQueueCreate(10, sizeof(espnow_msg_t));

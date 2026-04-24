@@ -2,20 +2,30 @@
 #include "WifiPortalManager.h"
 
 const char *PARAM_MESSAGE = "message"; // message server receives from client
-AsyncWebServer server(80);
-WebSocketsServer m_websocketserver = WebSocketsServer(81);
-
-WiFiClient wifiClient;
-
 const int WAIT_FOR_WIFI_TIME_OUT = 6000;
-
-std::unique_ptr<DNSServer> dnsServer;
 std::unique_ptr<AsyncWebServer> m_wifitools_server;
-
-const byte DNS_PORT = 53;
 bool restartSystem = false;
 String temp_json_string = "";
 
+void wifi_portal_init()
+{
+  bool m_autoconnected_attempt_succeeded = false;
+  m_autoconnected_attempt_succeeded = wifi_connect_attempt("", ""); // uses SSID/PWD stored in ESP32 secret memory.....
+  if (!m_autoconnected_attempt_succeeded)
+  {
+    Serial.println("Failed to connect.");
+    String m_filenametopass = "/credentials.JSON";
+    m_autoconnected_attempt_succeeded = read_wifi_credentials_file(m_filenametopass);
+  }
+  if (!m_autoconnected_attempt_succeeded)
+  {
+    setup_ap_service();
+    run_wifi_portal();
+  }
+
+  MDNS.begin("ximplex_websocket");
+  Serial.println(WiFi.localIP());
+}
 
 boolean wifi_connect_attempt(String ssid, String password)
 {
@@ -133,9 +143,8 @@ void setup_ap_service()
 {
   Serial.println(F("Starting Access Point server."));
   WiFi.mode(WIFI_AP);
-  WiFi.softAP("Ximplex_LuckD");
+  WiFi.softAP("Ximplex LKD");
   delay(1000);
-
 }
 
 void process()
@@ -147,8 +156,8 @@ void process()
     if (restartSystem + 1000 < millis())
     {
       ESP.restart();
-    } 
-  } 
+    }
+  }
 }
 
 void get_wifi_scan_json(AsyncWebServerRequest *request)
@@ -309,7 +318,6 @@ void handle_get_save_secret_json(AsyncWebServerRequest *request)
 
 void run_wifi_portal()
 {
-
   m_wifitools_server.reset(new AsyncWebServer(80));
 
   IPAddress myIP;
@@ -352,35 +360,3 @@ void run_wifi_portal()
     process();
   }
 }
-
-// void setup()
-// {
-//   Serial.begin(115200);
-
-//   if (!SPIFFS.begin(true))
-//   {
-//     Serial.println("An Error has occurred while mounting SPIFFS");
-//     return;
-//   }
-
-//   bool m_autoconnected_attempt_succeeded = false;
-//   m_autoconnected_attempt_succeeded = wifi_connect_attempt("", ""); // uses SSID/PWD stored in ESP32 secret memory.....
-//   if (!m_autoconnected_attempt_succeeded)
-//   {
-//     // try SSID/PWD from file...
-//     Serial.println("Failed to connect.");
-//     String m_filenametopass = "/credentials.JSON";
-//     m_autoconnected_attempt_succeeded = read_wifi_credentials_file(m_filenametopass);
-//   }
-//   if (!m_autoconnected_attempt_succeeded)
-//   {
-//     setup_ap_service();
-//     run_wifi_portal();
-//   }
-
-//   MDNS.begin("ximplex_websocket");
-
-
-//   Serial.println(WiFi.localIP());
-
-// }
