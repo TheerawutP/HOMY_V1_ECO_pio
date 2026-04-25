@@ -10,11 +10,12 @@
 #include <SPIFFS.h>
 #include "ElevatorTypes.h"
 
-void websocket_init();
+
+void websocket_init(QueueHandle_t cmd_queue);
 
 void send_websocket_alert(const char *alertType, const char *message);
 
-void configure_server();
+void configure_server(QueueHandle_t cmd_queue);
 
 void on_websocket_event(uint8_t num,
                       WStype_t type,

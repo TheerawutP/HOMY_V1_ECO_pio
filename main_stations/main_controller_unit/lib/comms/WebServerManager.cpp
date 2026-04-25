@@ -1,15 +1,16 @@
 #include "WebServerManager.h"
-#
 
+static QueueHandle_t m_tx_queue = NULL;
 AsyncWebServer server(80);
 WebSocketsServer m_websocketserver = WebSocketsServer(81);
 // const char *PARAM_MESSAGE = "message"; // message server receives from client
 
-void websocket_init()
-{
-  configure_server();
+void websocket_init(QueueHandle_t cmd_queue )
+{   
+  configure_server(cmd_queue);
   m_websocketserver.begin();
   m_websocketserver.onEvent(on_websocket_event); // Start WebSocket server and assign callback
+  
 }
 
 void send_websocket_alert(const char *alertType, const char *message)
@@ -113,9 +114,10 @@ void on_websocket_event(uint8_t num,
   }
 }
 
-void configure_server()
+void configure_server(QueueHandle_t cmd_queue)
 // configures server
 {
+  m_tx_queue = cmd_queue;
   // Need to tell server to accept packets from any source with any header via http methods GET, PUT:
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, PUT");
@@ -129,6 +131,10 @@ void configure_server()
                                                       {
                                                         Serial.println("Up button pressed.");
                                                         Serial.println("------------------");
+                                                        
+                                                        user_command cmd = {2, command_type_t::TRANSIT};
+                                                        xQueueSend(m_tx_queue, &cmd, 0);
+                                                        
                                                       }
                                                       request1->send(200, "OK"); }));
 
@@ -140,6 +146,9 @@ void configure_server()
                                                       {
                                                         Serial.println("Down button pressed.");
                                                         Serial.println("------------------");
+                                                        
+                                                        user_command cmd = {1, command_type_t::TRANSIT};
+                                                        xQueueSend(m_tx_queue, &cmd, 0);
                                                       }
                                                       request2->send(200, "OK"); }));
 
@@ -151,6 +160,9 @@ void configure_server()
                                                       {
                                                         Serial.println("stop button pressed. Stopping all movement!");
                                                         Serial.println("------------------");
+
+                                                        user_command cmd = {0, command_type_t::STOP};
+                                                        xQueueSend(m_tx_queue, &cmd, 0);
                                                       }
                                                       request3->send(200, "OK"); }));
 
@@ -162,8 +174,10 @@ void configure_server()
                                                       {
                                                         Serial.println("Emergency button pressed. Stopping all movement immediately!");
                                                         Serial.println("------------------");
-                                                        // ws_cmd = true;
-                                                        // ws_cmd_value = POWER_CUT;                                          
+
+                                                        user_command cmd = {0, command_type_t::EMG_STOP};
+                                                        xQueueSend(m_tx_queue, &cmd, 0);
+
                                                       }
                                                       request4->send(200, "OK"); }));
 

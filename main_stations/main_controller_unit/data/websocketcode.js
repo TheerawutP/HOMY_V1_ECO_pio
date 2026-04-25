@@ -110,6 +110,97 @@ function addData(label, data) {
 
 
 // Called when a message is received from the server
+// function onMessage(evt) {
+//     const STATE_IDLE = 0;
+//     const STATE_RUNNING = 1;
+//     const STATE_PENDING = 2;
+//     const STATE_PAUSED = 3;
+//     const STATE_EMERGENCY = 4;
+
+//     console.log("onMessage called");
+
+//     if (typeof (evt.data) == "string") {
+//         console.log("STRING! parsing....");
+//         console.log("Received: " + evt.data);
+
+//         try {
+//             var m_json_obj = JSON.parse(evt.data);
+
+//             var btnUp = document.getElementById("btnUp");
+//             var btnDown = document.getElementById("btnDown");
+//             // var btnEmg = document.getElementById("btnEmergency");
+            
+
+//             if ('alert' in m_json_obj) {
+//                 showToast(m_json_obj.alert, m_json_obj.msg);
+//                 return; 
+//             }
+
+
+//             if ('floorValue' in m_json_obj) {
+//                 var floorNumDisplay = document.querySelector("#FloorValue .floor-num");
+//                 if (floorNumDisplay) {
+//                     floorNumDisplay.innerText = m_json_obj.floorValue;
+//                 }
+//             }
+
+//             if (m_json_obj.state == STATE_RUNNING || m_json_obj.state == STATE_PENDING) {
+//                 if (m_json_obj.up === true) {
+//                     btnUp?.classList.add("up-active");
+//                 } else {
+//                     btnUp?.classList.remove("up-active");
+//                 }
+
+//                 if (m_json_obj.down === true) {
+//                     btnDown?.classList.add("down-active");
+//                 } else {
+//                     btnDown?.classList.remove("down-active");
+//                 }
+
+//             } else {
+//                 // ถ้าลิฟต์จอด (IDLE) ให้ดับไฟปุ่มทั้งหมด
+//                 btnUp?.classList.remove("up-active");
+//                 btnDown?.classList.remove("down-active");
+//             }
+
+//             if ('emo' in m_json_obj) {
+//                 if (m_json_obj.emo === true) {
+//                     // ถ้า true ให้ใส่คลาสไฟกระพริบสีแดง
+//                     btnEmg?.classList.add("emerg-active");
+//                     emgText?.classList.add("show");
+//                 } else {
+//                     // ถ้า false ให้ลบคลาสทิ้งไป (ไฟดับ)
+//                     btnEmg?.classList.remove("emerg-active");
+//                     emgText?.classList.remove("show");
+//                 }
+//             }
+
+//             // if ('Mode' in m_json_obj) {
+//             //     if (m_json_obj.Mode === "EMERGENCY") {
+//             //         btnEmg?.classList.add("blink");
+//             //     } else {
+//             //         btnEmg?.classList.remove("blink");
+//             //     }
+//             // }
+
+//             if ('btwFloor' in m_json_obj) {
+//                 var floorMsg = document.querySelector("#FloorValue .floor-msg");
+
+//                 if (floorMsg) {
+//                     if (m_json_obj.btwFloor === true) {
+//                         floorMsg.classList.add("show");
+//                     } else {
+//                         floorMsg.classList.remove("show");
+//                     }
+//                 }
+//             }
+
+//         } catch (e) {
+//             console.error("Error parsing JSON: ", e);
+//         }
+//     }
+// }
+
 function onMessage(evt) {
     const STATE_IDLE = 0;
     const STATE_RUNNING = 1;
@@ -117,25 +208,21 @@ function onMessage(evt) {
     const STATE_PAUSED = 3;
     const STATE_EMERGENCY = 4;
 
-    console.log("onMessage called");
+    // console.log("Received: " + evt.data); 
 
     if (typeof (evt.data) == "string") {
-        console.log("STRING! parsing....");
-        console.log("Received: " + evt.data);
-
         try {
             var m_json_obj = JSON.parse(evt.data);
 
             var btnUp = document.getElementById("btnUp");
             var btnDown = document.getElementById("btnDown");
-            // var btnEmg = document.getElementById("btnEmergency");
-            
+            var btnEmg = document.getElementById("btnEmergency"); 
+            var emgText = document.getElementById("emgText");     
 
             if ('alert' in m_json_obj) {
                 showToast(m_json_obj.alert, m_json_obj.msg);
                 return; 
             }
-
 
             if ('floorValue' in m_json_obj) {
                 var floorNumDisplay = document.querySelector("#FloorValue .floor-num");
@@ -144,7 +231,14 @@ function onMessage(evt) {
                 }
             }
 
-            if (m_json_obj.state == STATE_RUNNING || m_json_obj.state == STATE_PENDING) {
+            if ('targetFloor' in m_json_obj) {
+                var targetDisplay = document.getElementById("targetFloorDisplay");
+                if (targetDisplay) {
+                    targetDisplay.innerText = m_json_obj.targetFloor;
+                }
+            }
+
+            if (m_json_obj.state === STATE_RUNNING || m_json_obj.state === STATE_PENDING) {
                 if (m_json_obj.up === true) {
                     btnUp?.classList.add("up-active");
                 } else {
@@ -156,42 +250,38 @@ function onMessage(evt) {
                 } else {
                     btnDown?.classList.remove("down-active");
                 }
-
             } else {
-                // ถ้าลิฟต์จอด (IDLE) ให้ดับไฟปุ่มทั้งหมด
                 btnUp?.classList.remove("up-active");
                 btnDown?.classList.remove("down-active");
             }
 
             if ('emo' in m_json_obj) {
                 if (m_json_obj.emo === true) {
-                    // ถ้า true ให้ใส่คลาสไฟกระพริบสีแดง
                     btnEmg?.classList.add("emerg-active");
                     emgText?.classList.add("show");
                 } else {
-                    // ถ้า false ให้ลบคลาสทิ้งไป (ไฟดับ)
                     btnEmg?.classList.remove("emerg-active");
                     emgText?.classList.remove("show");
                 }
             }
 
-            // if ('Mode' in m_json_obj) {
-            //     if (m_json_obj.Mode === "EMERGENCY") {
-            //         btnEmg?.classList.add("blink");
-            //     } else {
-            //         btnEmg?.classList.remove("blink");
-            //     }
-            // }
-
             if ('btwFloor' in m_json_obj) {
                 var floorMsg = document.querySelector("#FloorValue .floor-msg");
-
                 if (floorMsg) {
                     if (m_json_obj.btwFloor === true) {
                         floorMsg.classList.add("show");
                     } else {
                         floorMsg.classList.remove("show");
                     }
+                }
+            }
+
+            if ('inv_raw' in m_json_obj) {
+                var inverterArray = m_json_obj.inv_raw;
+                
+                var voltDisplay = document.getElementById("invVoltage");
+                if (voltDisplay && inverterArray.length > 0) {
+                    voltDisplay.innerText = inverterArray[0] + " V";
                 }
             }
 
@@ -236,19 +326,14 @@ function showToast(type, message) {
     var container = document.getElementById("toast-container");
     if (!container) return;
 
-    // สร้างกล่อง div ใหม่
     var toast = document.createElement("div");
     
-    // ใส่คลาสตามประเภทที่ส่งมา (danger, warning, info) แปลงตัวพิมพ์เล็ก
     toast.className = "toast-msg " + type.toLowerCase();
     
-    // ใส่ข้อความ
     toast.innerHTML = "<strong>" + type + "</strong>" + message;
 
-    // เอาไปแปะในหน้าจอ
     container.appendChild(toast);
 
-    // ตั้งเวลาให้ลบตัวเองทิ้งหลังจากผ่านไป 5 วินาที
     setTimeout(function() {
         if(container.contains(toast)){
             container.removeChild(toast);
