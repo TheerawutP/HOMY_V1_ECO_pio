@@ -44,7 +44,7 @@ void Orchestrator::notify_state_changed()
     {
         for (int i = 0; i < observer_count; i++)
         {
-            observers[i]->on_state_changed(data.current_state, last_direction);
+            observers[i]->on_state_changed(data);
         }
         last_notified_state = data.current_state;
         last_notified_dir = last_direction;
@@ -70,7 +70,7 @@ void Orchestrator::update_position()
     {
         data.current_floor = current_sensor_floor;
         data.btw_floor = false;
-        notify_floor_changed();
+        notify_floor_changed(); 
     }
     else
     {
@@ -100,7 +100,8 @@ void Orchestrator::execute_state_machine()
         if (dir != elevator_direction_t::NONE)
         {
             if (is_safe_to_run(dir))
-            {
+            {   
+                data.dir = dir;
                 hal->motor_rotate(dir);
                 last_direction = dir;
             }
@@ -111,6 +112,7 @@ void Orchestrator::execute_state_machine()
             // something is wrong or we are already there.
             hal->motor_stop();
             data.current_state = elevator_state_t::IDLE;
+            data.dir = elevator_direction_t::NONE;
         }
     }
     else if (data.current_state == elevator_state_t::IDLE)
@@ -148,7 +150,7 @@ elevator_direction_t Orchestrator::calculate_direction()
 
             // if wanna go back, GO DOWN
             if (data.target <= data.current_floor)
-            {
+            {   
                 return elevator_direction_t::DOWN;
             }
             else
@@ -427,15 +429,3 @@ bool Orchestrator::is_safe_to_run(elevator_direction_t dir)
     return true; // Safe to run
 };
 
-// void Ochestrator::isReachFloor(uint8_t floorNum) {};
-// void Ochestrator::clearCommand() {};
-// void Ochestrator::isSafeToRun(ElevatorDirection dir) {};
-
-// elevator_snapshot get_current_state() {
-//     elevator_snapshot temp;
-//     if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-//         temp = this->state;
-//         xSemaphoreGive(dataMutex);
-//     }
-//     return temp;
-// }
