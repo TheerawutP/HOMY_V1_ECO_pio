@@ -21,9 +21,11 @@ Orchestrator logic(&io);
 TaskHandle_t xElevatorHandle;
 QueueHandle_t xQueueCommand = NULL;
 QueueHandle_t xQueueSending = NULL;
+QueueHandle_t xQueueUpdating = NULL;
 SemaphoreHandle_t dataMutex = NULL;
 
 CabinObserver *cabin_observer;
+WebServerObserver *webserver_observer;
 
 void elevator_manager_task(void *pvParams)
 {
@@ -115,6 +117,19 @@ void rf_receiver_task(void *pvParams)
     }
 }
 
+void webserver_manager_task(void *pvParams)
+{   
+    elevator_snapshot new_data;
+
+    for (;;)
+    {
+        while (xQueueReceive(xQueueUpdating, &new_data, 0) == pdPASS)
+        {
+            update_ui_data(new_data);
+        }
+    }
+    vTaskDelay(pdMS_TO_TICKS(30));
+}
 // void vModbusPolling(void *pvParams)
 // void vTelemetry(void *pvParams)
 // void vDataLog(void *pvParams)
@@ -131,7 +146,7 @@ void setup()
 
     wifi_portal_init();
     websocket_init();
-    
+
     dataMutex = xSemaphoreCreateMutex();
     xQueueCommand = xQueueCreate(10, sizeof(user_command));
     xQueueSending = xQueueCreate(10, sizeof(espnow_msg_t));
@@ -139,12 +154,16 @@ void setup()
     io.init_pins();
 
     cabin_observer = new CabinObserver(xQueueSending);
+    webserver_observer = new WebServerObserver(xQueueUpdating);
+
     logic.attach_observer(cabin_observer);
+    logic.attach_observer(webserver_observer);
 
     xTaskCreate(elevator_manager_task, "ElevatorManager", 4096, NULL, 3, &xElevatorHandle);
     xTaskCreate(sensor_monitor_task, "SensorMonitor", 4096, NULL, 3, NULL);
     xTaskCreate(esp_now_manager_task, "EspNowManager", 4096, NULL, 3, NULL);
     xTaskCreate(rf_receiver_task, "RFReceiver", 4096, NULL, 3, NULL);
+    xTaskCreate(webserver_manager_task, "webserverManager", 4096, NULL, 3, NULL);
     // xTaskCreate(vTelemetry, "Telemetry", 8192, NULL, 2, NULL);
     // xTaskCreate(vDataLog, "DataLog", 2048, NULL, 2, NULL);
 }
