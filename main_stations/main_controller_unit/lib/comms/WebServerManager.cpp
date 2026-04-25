@@ -1,4 +1,5 @@
 #include "WebServerManager.h"
+#
 
 AsyncWebServer server(80);
 WebSocketsServer m_websocketserver = WebSocketsServer(81);
@@ -234,53 +235,28 @@ void configure_server()
   server.begin();
 }
 
-void vUpdatePage(void *pvParams)
+void update_ui_data(elevator_snapshot data)
 {
-  static char jsonBuf[512];
-  unsigned long lastSendTime = 0;
-  const unsigned long SEND_INTERVAL = 100;
+    static char jsonBuf[512];
+    snprintf(
+        jsonBuf,
+        sizeof(jsonBuf),
+        "{\"floorValue\":%d,"
+        "\"state\":%d,"
+        "\"up\":%s,"
+        "\"down\":%s,"
+        "\"targetFloor\":%d,"
+        "\"btwFloor\":%s,"
+        "\"emo\":%s,"
+        "\"inv_raw\":[%u,%u,%u,%u,%u,%u,%u,%u,%u,%u]}", 
+        data.current_floor,                                             
+        (int)data.current_state,                                        
+        (data.dir == elevator_direction_t::UP) ? "true" : "false",     
+        (data.dir == elevator_direction_t::DOWN) ? "true" : "false",     
+        data.target,                                                    
+        data.btw_floor ? "true" : "false",                              
+        (data.safety_flags & EMO_IS_PRESSED) ? "true" : "false"        
+    );
 
-  for (;;)
-  {
-
-    m_websocketserver.loop();
-
-    // if (millis() - lastSendTime >= SEND_INTERVAL)
-    // {
-    //   lastSendTime = millis();
-
-    //   uint16_t inv_raw[10] = {0};
-    //   if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE)
-    //   {
-    //     for (int i = 0; i < 10; i++)
-    //       inv_raw[i] = inverterState.raw_regs[i];
-    //     xSemaphoreGive(dataMutex);
-    //   }
-
-    //   snprintf(
-    //       jsonBuf,
-    //       sizeof(jsonBuf),
-    //       "{\"floorValue\":%d,"
-    //       "\"state\":%d,"
-    //       "\"up\":%s,"
-    //       "\"down\":%s,"
-    //       "\"targetFloor\":%d,"
-    //       "\"btwFloor\":%s,"
-    //       "\"emo\":%s,"
-    //       "\"inv_raw\":[%u,%u,%u,%u,%u,%u,%u,%u,%u,%u]}", // แทรก Array ตรงนี้
-    //       elevator.pos,
-    //       elevator.state,
-    //       (elevator.dir == DIR_UP) ? "true" : "false",
-    //       (elevator.dir == DIR_DOWN) ? "true" : "false",
-    //       elevator.target,
-    //       (elevator.btwFloor) ? "true" : "false",
-    //       (digitalRead(EMO) == HIGH) ? "true" : "false",
-    //       inv_raw[0], inv_raw[1], inv_raw[2], inv_raw[3], inv_raw[4],
-    //       inv_raw[5], inv_raw[6], inv_raw[7], inv_raw[8], inv_raw[9]);
-
-    //   m_websocketserver.broadcastTXT(jsonBuf, strlen(jsonBuf));
-    // }
-
-    vTaskDelay(pdMS_TO_TICKS(20));
-  }
+    m_websocketserver.broadcastTXT(jsonBuf, strlen(jsonBuf));
 }

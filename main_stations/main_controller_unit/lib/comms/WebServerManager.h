@@ -8,6 +8,7 @@
 #include "DNSServer.h"
 #include "Preferences.h"
 #include <SPIFFS.h>
+#include "ElevatorTypes.h"
 
 void websocket_init();
 
@@ -21,3 +22,5 @@ void on_websocket_event(uint8_t num,
                       size_t length);
 
 void handle_websocket_text(uint8_t *payload);
+
+void update_ui_data(elevator_snapshot data);
