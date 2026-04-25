@@ -40,13 +40,11 @@ void elevator_manager_task(void *pvParams)
         }
 
         if (xQueueReceive(xQueueCommand, &cmd, 0) == pdPASS)
-        {
+        {   
             logic.user_command_handle(cmd);
         }
 
-        logic.update_position();
-        logic.execute_state_machine();
-
+        logic.update();
         vTaskDelay(pdMS_TO_TICKS(30));
     }
 }
@@ -70,9 +68,10 @@ void sensor_monitor_task(void *pvParams)
         is_speed_trig = io.status_governor;
         is_sling_cut = io.status_sling;
         is_brake_engage = io.status_brake;
-
-        // if (is_at_floor_1) xTaskNotify(xElevatorHandle, REACH_FLOOR_1, eSetValueWithOverwrite);
-        // if (is_at_floor_2) xTaskNotify(xElevatorHandle, REACH_FLOOR_2, eSetValueWithOverwrite);
+        
+        if (is_at_floor_1) xTaskNotify(xElevatorHandle, REACH_FLOOR_1, eSetValueWithOverwrite);
+        if (is_at_floor_2) xTaskNotify(xElevatorHandle, REACH_FLOOR_2, eSetValueWithOverwrite);
+        if(!is_at_floor_1 && !is_at_floor_2) xTaskNotify(xElevatorHandle, BETWEEN_FLOOR, eSetValueWithOverwrite);
         // if (is_emo) xTaskNotify(xElevatorHandle, EMO_IS_PRESSED, eSetValueWithOverwrite);
 
         // if (is_sling_cut)
@@ -118,18 +117,19 @@ void rf_receiver_task(void *pvParams)
 }
 
 void webserver_manager_task(void *pvParams)
-{   
+{
     elevator_snapshot new_data;
 
     for (;;)
-    {   
+    {
         webserver_loop();
         while (xQueueReceive(xQueueUpdating, &new_data, 0) == pdPASS)
         {
             update_ui_data(new_data);
         }
+            
+        vTaskDelay(pdMS_TO_TICKS(30));
     }
-    vTaskDelay(pdMS_TO_TICKS(30));
 }
 
 // void vModbusPolling(void *pvParams)
@@ -145,14 +145,14 @@ void setup()
         return;
     }
 
-    wifi_portal_init();
-    websocket_init();
-
     dataMutex = xSemaphoreCreateMutex();
     xQueueCommand = xQueueCreate(10, sizeof(user_command));
     xQueueSending = xQueueCreate(10, sizeof(espnow_msg_t));
-
+    xQueueUpdating = xQueueCreate(10, sizeof(elevator_snapshot));
     io.init_pins();
+
+    wifi_portal_init();
+    websocket_init(xQueueCommand);
 
     cabin_observer = new CabinObserver(xQueueSending);
     webserver_observer = new WebServerObserver(xQueueUpdating);

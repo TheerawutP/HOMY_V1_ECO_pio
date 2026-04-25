@@ -11,8 +11,7 @@ class ElevatorLogic
 public:
     virtual ~ElevatorLogic() = default;
 
-    virtual void update_position() = 0;
-    virtual void execute_state_machine() = 0;
+    virtual void update() = 0;
     virtual void stop_running() = 0;
     virtual void user_command_handle(user_command cmd) = 0;
     virtual void event_handle(uint32_t evt) = 0;
@@ -35,7 +34,7 @@ private:
 
     elevator_state_t last_notified_state = elevator_state_t::IDLE;
     elevator_direction_t last_notified_dir = elevator_direction_t::NONE;
-
+    
     uint16_t last_cabin_frame = 0;
     uint16_t last_vsg_frame = 0;
 
@@ -55,8 +54,7 @@ public:
 
     void attach_observer(IElevatorObserver *obs);
 
-    void update_position() override;
-    void execute_state_machine() override;
+    void update() override;
     void stop_running() override;
     void user_command_handle(user_command cmd) override;
     void event_handle(uint32_t evt) override;

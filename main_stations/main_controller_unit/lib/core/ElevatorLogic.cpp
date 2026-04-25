@@ -13,8 +13,10 @@ Orchestrator::Orchestrator(ElevatorHal *hardwarePtr)
     this->hal = hardwarePtr;
     data.current_floor = 1;
     data.btw_floor = false;
+    data.target = 0;
     data.current_state = elevator_state_t::IDLE;
     last_direction = elevator_direction_t::NONE;
+    data.safety_flags = 0;
 
     xSafetyEventGroup = xEventGroupCreate();
     xEventGroupClearBits(xSafetyEventGroup, 0xFFFFFF);
@@ -34,7 +36,7 @@ void Orchestrator::notify_floor_changed()
 {
     for (int i = 0; i < observer_count; i++)
     {
-        observers[i]->on_floor_changed(data.current_floor);
+        observers[i]->on_floor_changed(data);
     }
 }
 
@@ -59,175 +61,20 @@ void Orchestrator::notify_event_triggered(uint32_t event_mask)
     }
 }
 
-void Orchestrator::update_position()
+void Orchestrator::update()
 {
-    // 1. Sync data with hardware
-    // hal->update_sensor();  //move to vSensor
-    uint8_t current_sensor_floor = hal->get_active_floor();
-
-    // Update internal state if a floor is hit
-    if (current_sensor_floor != 0)
-    {
-        data.current_floor = current_sensor_floor;
-        data.btw_floor = false;
-        notify_floor_changed(); 
-    }
-    else
-    {
-        data.btw_floor = true;
-    }
-};
-
-void Orchestrator::execute_state_machine()
-{
-
     // Control flow based on state
     if (data.current_state == elevator_state_t::RUNNING)
     {
         // Check if reached target
-        if (hal->is_at_floor(data.target))
+        if (data.current_floor == data.target && data.btw_floor == false)
         {
             hal->motor_stop();
             data.current_state = elevator_state_t::IDLE;
-            last_direction = elevator_direction_t::NONE;
             Serial.printf("[INFO] Reached target floor %d\n", data.target);
             notify_state_changed();
             return;
         }
-
-        // Calculate and apply movement
-        elevator_direction_t dir = calculate_direction();
-        if (dir != elevator_direction_t::NONE)
-        {
-            if (is_safe_to_run(dir))
-            {   
-                data.dir = dir;
-                hal->motor_rotate(dir);
-                last_direction = dir;
-            }
-        }
-        else
-        {
-            // If calculate_direction returns NONE but we are RUNNING,
-            // something is wrong or we are already there.
-            hal->motor_stop();
-            data.current_state = elevator_state_t::IDLE;
-            data.dir = elevator_direction_t::NONE;
-        }
-    }
-    else if (data.current_state == elevator_state_t::IDLE)
-    {
-        // Ensure motor is stopped and brake is engaged in IDLE
-        hal->motor_stop();
-    }
-
-    notify_state_changed();
-};
-
-void Orchestrator::stop_running()
-{
-    this->hal->motor_stop();
-    data.target = 0;
-    data.current_state = elevator_state_t::IDLE;
-    notify_state_changed();
-};
-
-elevator_direction_t Orchestrator::calculate_direction()
-{
-    // 1. reach the floor at exact position
-    if (data.target == data.current_floor && data.btw_floor == false)
-    {
-        return elevator_direction_t::NONE;
-    }
-
-    // 2. in case of (btwFloor == true)
-    if (data.btw_floor == true)
-    {
-
-        // last direction = UP THEN CABIN is higher than currentFloor
-        if (last_direction == elevator_direction_t::UP)
-        {
-
-            // if wanna go back, GO DOWN
-            if (data.target <= data.current_floor)
-            {   
-                return elevator_direction_t::DOWN;
-            }
-            else
-            {
-                return elevator_direction_t::UP;
-            }
-        }
-
-        // last direction = DOWN THEN CABIN is lower than currentFloor
-        else if (last_direction == elevator_direction_t::DOWN)
-        {
-
-            // if wanna go back, GO UP
-            if (data.target >= data.current_floor)
-            {
-                return elevator_direction_t::UP;
-            }
-            else
-            {
-                return elevator_direction_t::DOWN;
-            }
-        }
-
-        // edge case if ele cant remember last_dir
-        //  else {
-        //      Serial.println("[WARN] Lost position! Homing down to find a floor.");
-        //      return ElevatorDirection::DOWN;
-        //  }
-    }
-
-    // 3. normal case: (btwFloor == false)
-    if (data.target > data.current_floor)
-    {
-        return elevator_direction_t::UP;
-    }
-
-    if (data.target < data.current_floor)
-    {
-        return elevator_direction_t::DOWN;
-    }
-
-    // prevent false (Fallback)
-    return elevator_direction_t::NONE;
-};
-
-void Orchestrator::user_command_handle(user_command cmd)
-{
-    if (data.current_state == elevator_state_t::EMERGENCY)
-    {
-        Serial.println("[WARN] Command Ignored: Elevator is in EMERGENCY state!");
-        return;
-    }
-
-    data.target = cmd.target;
-
-    switch (cmd.type)
-    {
-    case command_type_t::TRANSIT:
-        if (data.current_state == elevator_state_t::IDLE)
-        {
-            data.current_state = elevator_state_t::RUNNING;
-        }
-        break;
-
-    case command_type_t::STOP:
-        if (data.current_state == elevator_state_t::RUNNING)
-        {
-            stop_running();
-        }
-        break;
-
-    case command_type_t::EMG_STOP:
-        /* code */
-        break;
-
-    default:
-        break;
     }
 };
 
@@ -314,6 +161,162 @@ void Orchestrator::event_handle(uint32_t evt_mask)
         xEventGroupClearBits(xSafetyEventGroup, DOOR_OPEN_BIT);
         Serial.println("[INFO] DOOR IS CLOSED -> CAN RUN!");
     }
+
+    if (evt_mask & REACH_FLOOR_1)
+    {
+        if (data.current_floor != 1 || data.btw_floor == true)
+        {
+            data.current_floor = 1;
+            data.btw_floor = false;
+            notify_floor_changed();
+        }
+    }
+
+    if (evt_mask & REACH_FLOOR_2)
+    {
+        if (data.current_floor != 2 || data.btw_floor == true)
+        {
+            data.current_floor = 2;
+            data.btw_floor = false;
+            notify_floor_changed();
+        }
+    }
+
+    if (evt_mask & BETWEEN_FLOOR)
+    {
+        data.btw_floor = true;
+    }
+};
+
+void Orchestrator::user_command_handle(user_command cmd)
+{
+    if (data.current_state == elevator_state_t::EMERGENCY)
+    {
+        Serial.println("[WARN] Command Ignored: Elevator is in EMERGENCY state!");
+        return;
+    }
+
+    data.target = cmd.target;
+    switch (cmd.type)
+    {
+    case command_type_t::TRANSIT:
+
+        if (data.current_state == elevator_state_t::IDLE)
+        {
+            elevator_direction_t dir = calculate_direction();
+
+            if (dir != elevator_direction_t::NONE)
+            {
+                if (is_safe_to_run(dir))
+                {   
+                    data.dir = dir;
+                    hal->motor_rotate(dir);
+                    data.current_state = elevator_state_t::RUNNING;
+
+                    notify_state_changed();
+                }
+            }
+            else
+            {
+                // If calculate_direction returns NONE but we are RUNNING,
+                // something is wrong or we are already there.
+                hal->motor_stop();
+                data.current_state = elevator_state_t::IDLE;
+                data.dir = elevator_direction_t::NONE;
+            }
+        }
+
+        break;
+
+    case command_type_t::STOP:
+        if (data.current_state == elevator_state_t::RUNNING)
+        {
+            data.last_dir = data.dir;
+            data.dir = elevator_direction_t::NONE;
+            stop_running();
+            notify_state_changed();
+        }
+        break;
+
+    case command_type_t::EMG_STOP:
+        /* code */
+        break;
+
+    default:
+        break;
+    }
+};
+
+void Orchestrator::stop_running()
+{
+    this->hal->motor_stop();
+    data.target = 0;
+    data.current_state = elevator_state_t::IDLE;
+    notify_state_changed();
+};
+
+elevator_direction_t Orchestrator::calculate_direction()
+{
+    // 1. reach the floor at exact position
+    if (data.target == data.current_floor && data.btw_floor == false)
+    {
+        return elevator_direction_t::NONE;
+    }
+
+    // 2. in case of (btwFloor == true)
+    if (data.btw_floor == true)
+    {
+
+        // last direction = UP THEN CABIN is higher than currentFloor
+        if (last_direction == elevator_direction_t::UP)
+        {
+
+            // if wanna go back, GO DOWN
+            if (data.target <= data.current_floor)
+            {
+                return elevator_direction_t::DOWN;
+            }
+            else
+            {
+                return elevator_direction_t::UP;
+            }
+        }
+
+        // last direction = DOWN THEN CABIN is lower than currentFloor
+        else if (last_direction == elevator_direction_t::DOWN)
+        {
+
+            // if wanna go back, GO UP
+            if (data.target >= data.current_floor)
+            {
+                return elevator_direction_t::UP;
+            }
+            else
+            {
+                return elevator_direction_t::DOWN;
+            }
+        }
+
+        // edge case if ele cant remember last_dir
+        //  else {
+        //      Serial.println("[WARN] Lost position! Homing down to find a floor.");
+        //      return ElevatorDirection::DOWN;
+        //  }
+    }
+
+    // 3. normal case: (btwFloor == false)
+    if (data.target > data.current_floor)
+    {
+        return elevator_direction_t::UP;
+    }
+
+    if (data.target < data.current_floor)
+    {
+        return elevator_direction_t::DOWN;
+    }
+
+    // prevent false (Fallback)
+    return elevator_direction_t::NONE;
 };
 
 void Orchestrator::process_remote_message(espnow_msg_t msg)
@@ -428,4 +431,3 @@ bool Orchestrator::is_safe_to_run(elevator_direction_t dir)
 
     return true; // Safe to run
 };
-

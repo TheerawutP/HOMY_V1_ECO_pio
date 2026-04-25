@@ -1,3 +1,4 @@
+//WebServerManager.cpp
 #include "WebServerManager.h"
 
 static QueueHandle_t m_tx_queue = NULL;
@@ -261,8 +262,7 @@ void update_ui_data(elevator_snapshot data)
         "\"down\":%s,"
         "\"targetFloor\":%d,"
         "\"btwFloor\":%s,"
-        "\"emo\":%s,"
-        "\"inv_raw\":[%u,%u,%u,%u,%u,%u,%u,%u,%u,%u]}", 
+        "\"emo\":%s}",
         data.current_floor,                                             
         (int)data.current_state,                                        
         (data.dir == elevator_direction_t::UP) ? "true" : "false",     

@@ -32,6 +32,7 @@ struct elevator_snapshot
   uint8_t current_floor;
   bool btw_floor;
   elevator_direction_t dir;
+  elevator_direction_t last_dir;
   uint32_t safety_flags; // event bitmask
 };
 
@@ -105,6 +106,7 @@ const rf_keymap_t rf_keys[] = {
 const int num_rf_keys = sizeof(rf_keys) / sizeof(rf_keymap_t);
 
 // event bitmask
+
 #define SAFETY_BRAKE_ENGAGE (1 << 0)
 #define DOOR_IS_OPEN (1 << 1)
 #define DOOR_IS_CLOSED (1 << 2)
@@ -114,6 +116,11 @@ const int num_rf_keys = sizeof(rf_keys) / sizeof(rf_keymap_t);
 #define VSG_ALARM_CLEAR (1 << 6)
 #define VTG_ALARM_TRIGGER (1 << 7)
 #define VTG_ALARM_CLEAR (1 << 8)
+#define REACH_FLOOR_1 (1 << 9)
+#define REACH_FLOOR_2 (1 << 10)
+#define REACH_FLOOR_3 (1 << 11)
+#define BETWEEN_FLOOR (1 << 12)
+
 
 #define OUT_EN_BRAKE (1 << 0)    // Bit 0: Enable safety sling
 #define OUT_EN_L_UP (1 << 1)     // Bit 1: Light UP
