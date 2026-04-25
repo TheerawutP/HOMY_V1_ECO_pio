@@ -122,7 +122,8 @@ void webserver_manager_task(void *pvParams)
     elevator_snapshot new_data;
 
     for (;;)
-    {
+    {   
+        webserver_loop();
         while (xQueueReceive(xQueueUpdating, &new_data, 0) == pdPASS)
         {
             update_ui_data(new_data);
@@ -130,8 +131,8 @@ void webserver_manager_task(void *pvParams)
     }
     vTaskDelay(pdMS_TO_TICKS(30));
 }
+
 // void vModbusPolling(void *pvParams)
-// void vTelemetry(void *pvParams)
 // void vDataLog(void *pvParams)
 
 void setup()
@@ -164,7 +165,6 @@ void setup()
     xTaskCreate(esp_now_manager_task, "EspNowManager", 4096, NULL, 3, NULL);
     xTaskCreate(rf_receiver_task, "RFReceiver", 4096, NULL, 3, NULL);
     xTaskCreate(webserver_manager_task, "webserverManager", 4096, NULL, 3, NULL);
-    // xTaskCreate(vTelemetry, "Telemetry", 8192, NULL, 2, NULL);
     // xTaskCreate(vDataLog, "DataLog", 2048, NULL, 2, NULL);
 }
 

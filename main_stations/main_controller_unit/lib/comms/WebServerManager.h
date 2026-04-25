@@ -24,3 +24,5 @@ void on_websocket_event(uint8_t num,
 void handle_websocket_text(uint8_t *payload);
 
 void update_ui_data(elevator_snapshot data);
+
+void webserver_loop();

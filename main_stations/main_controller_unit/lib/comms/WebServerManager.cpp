@@ -260,3 +260,7 @@ void update_ui_data(elevator_snapshot data)
 
     m_websocketserver.broadcastTXT(jsonBuf, strlen(jsonBuf));
 }
+
+void webserver_loop(){
+  m_websocketserver.loop();
+}
