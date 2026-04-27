@@ -231,15 +231,17 @@ void Orchestrator::user_command_handle(user_command cmd)
     case command_type_t::STOP:
         if (data.current_state == elevator_state_t::RUNNING)
         {
-            data.last_dir = data.dir;
-            data.dir = elevator_direction_t::NONE;
             stop_running();
             notify_state_changed();
         }
         break;
 
     case command_type_t::EMG_STOP:
-        /* code */
+
+        stop_running();
+        hal->emergency_stop();
+        notify_state_changed();
+
         break;
 
     default:
@@ -252,7 +254,9 @@ void Orchestrator::stop_running()
     this->hal->motor_stop();
     data.target = 0;
     data.current_state = elevator_state_t::IDLE;
-    notify_state_changed();
+    data.last_dir = data.dir;
+    data.dir = elevator_direction_t::NONE;
+    // notify_state_changed();
 };
 
 elevator_direction_t Orchestrator::calculate_direction()
@@ -275,16 +279,17 @@ elevator_direction_t Orchestrator::calculate_direction()
 
         if (data.target == data.current_floor)
         {
-            if (is_above_current) return elevator_direction_t::DOWN; 
-            else return elevator_direction_t::UP;                    
+            if (is_above_current)
+                return elevator_direction_t::DOWN;
+            else
+                return elevator_direction_t::UP;
         }
     }
-        // edge case if ele cant remember last_dir
-        //  else {
-        //      Serial.println("[WARN] Lost position! Homing down to find a floor.");
-        //      return ElevatorDirection::DOWN;
-        //  }
-    
+    // edge case if ele cant remember last_dir
+    //  else {
+    //      Serial.println("[WARN] Lost position! Homing down to find a floor.");
+    //      return ElevatorDirection::DOWN;
+    //  }
 
     // 3. normal case: (btwFloor == false)
     if (data.target > data.current_floor)
