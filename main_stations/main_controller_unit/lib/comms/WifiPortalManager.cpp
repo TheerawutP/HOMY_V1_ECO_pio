@@ -250,27 +250,21 @@ void handle_get_save_secret_json(AsyncWebServerRequest *request)
   {
     message = "No message sent";
   }
-  request->send(200, "text/HTML", "Credentials saved. Rebooting...");
-
-  // {"SSID1":"myssid1xyz","PWD1":"mypwd1xyz",
-  //     "SSID2":"myssid2xyz","PWD2":"mypwd2xyz",
-  //     "SSID3":"myssid3xyz","PWD3":"mypwd3xyz"}
-
-  String SSID_and_pwd_JSON = "";
-  SSID_and_pwd_JSON += "{\"SSID1\":\"";
-  SSID_and_pwd_JSON += m_SSID1_name;
+  // Build JSON safely with size limits
+  String SSID_and_pwd_JSON = "{\"SSID1\":\"";
+  SSID_and_pwd_JSON += m_SSID1_name.substring(0, 32);  // Limit SSID length
   SSID_and_pwd_JSON += "\",\"PWD1\":\"";
-  SSID_and_pwd_JSON += m_PWD1_name;
+  SSID_and_pwd_JSON += m_PWD1_name.substring(0, 64);   // Limit password length
 
   SSID_and_pwd_JSON += "\",\"SSID2\":\"";
-  SSID_and_pwd_JSON += m_SSID2_name;
+  SSID_and_pwd_JSON += m_SSID2_name.substring(0, 32);
   SSID_and_pwd_JSON += "\",\"PWD2\":\"";
-  SSID_and_pwd_JSON += m_PWD2_name;
+  SSID_and_pwd_JSON += m_PWD2_name.substring(0, 64);
 
   SSID_and_pwd_JSON += "\",\"SSID3\":\"";
-  SSID_and_pwd_JSON += m_SSID3_name;
+  SSID_and_pwd_JSON += m_SSID3_name.substring(0, 32);
   SSID_and_pwd_JSON += "\",\"PWD3\":\"";
-  SSID_and_pwd_JSON += m_PWD3_name;
+  SSID_and_pwd_JSON += m_PWD3_name.substring(0, 64);
 
   SSID_and_pwd_JSON += "\"}";
 
@@ -295,11 +289,13 @@ void handle_get_save_secret_json(AsyncWebServerRequest *request)
   Serial.print("m_PWD3_name = ");
   Serial.println(m_PWD3_name);
 
+  // Write file BEFORE sending response
   File m_ssid_pwd_file_to_write_name = SPIFFS.open("/credentials.JSON", FILE_WRITE);
 
   if (!m_ssid_pwd_file_to_write_name)
   {
     Serial.println("There was an error opening the pwd/ssid file for writing");
+    request->send(500, "text/html", "<h1>Error saving credentials</h1>");
     return;
   }
 
@@ -309,10 +305,14 @@ void handle_get_save_secret_json(AsyncWebServerRequest *request)
   if (!m_ssid_pwd_file_to_write_name.println(SSID_and_pwd_JSON))
   {
     Serial.println("File write failed");
+    m_ssid_pwd_file_to_write_name.close();
+    request->send(500, "text/html", "<h1>File write failed</h1>");
+    return;
   }
   m_ssid_pwd_file_to_write_name.close();
 
-  request->send(200, "text/html", "<h1>Restarting .....</h1>");
+  // Send SINGLE response after file operations complete
+  request->send(200, "text/html", "<h1>Credentials saved. Rebooting...</h1>");
   restartSystem = millis();
 }
 
