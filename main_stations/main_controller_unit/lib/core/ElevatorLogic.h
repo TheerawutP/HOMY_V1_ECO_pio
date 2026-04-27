@@ -30,10 +30,7 @@ public:
 private:
     // elevator_snapshot data;
     elevator_direction_t calculate_direction();
-    elevator_direction_t last_direction = elevator_direction_t::NONE;
-
     elevator_state_t last_notified_state = elevator_state_t::IDLE;
-    elevator_direction_t last_notified_dir = elevator_direction_t::NONE;
     
     uint16_t last_cabin_frame = 0;
     uint16_t last_vsg_frame = 0;

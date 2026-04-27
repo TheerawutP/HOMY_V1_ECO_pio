@@ -14,8 +14,9 @@ Orchestrator::Orchestrator(ElevatorHal *hardwarePtr)
     data.current_floor = 1;
     data.btw_floor = false;
     data.target = 0;
+    data.last_target = 0;
     data.current_state = elevator_state_t::IDLE;
-    last_direction = elevator_direction_t::NONE;
+    data.last_dir = elevator_direction_t::NONE;
     data.safety_flags = 0;
 
     xSafetyEventGroup = xEventGroupCreate();
@@ -42,14 +43,13 @@ void Orchestrator::notify_floor_changed()
 
 void Orchestrator::notify_state_changed()
 {
-    if (data.current_state != last_notified_state || last_direction != last_notified_dir)
+    if (data.current_state != last_notified_state)
     {
         for (int i = 0; i < observer_count; i++)
         {
             observers[i]->on_state_changed(data);
         }
         last_notified_state = data.current_state;
-        last_notified_dir = last_direction;
     }
 }
 
@@ -208,7 +208,7 @@ void Orchestrator::user_command_handle(user_command cmd)
             if (dir != elevator_direction_t::NONE)
             {
                 if (is_safe_to_run(dir))
-                {   
+                {
                     data.dir = dir;
                     hal->motor_rotate(dir);
                     data.current_state = elevator_state_t::RUNNING;
@@ -263,46 +263,28 @@ elevator_direction_t Orchestrator::calculate_direction()
         return elevator_direction_t::NONE;
     }
 
-    // 2. in case of (btwFloor == true)
-    if (data.btw_floor == true)
+    if (data.target != data.current_floor)
     {
 
-        // last direction = UP THEN CABIN is higher than currentFloor
-        if (last_direction == elevator_direction_t::UP)
+        data.last_target = data.target;
+    }
+
+    if (data.btw_floor == true)
+    {
+        bool is_above_current = (data.last_target > data.current_floor);
+
+        if (data.target == data.current_floor)
         {
-
-            // if wanna go back, GO DOWN
-            if (data.target <= data.current_floor)
-            {
-                return elevator_direction_t::DOWN;
-            }
-            else
-            {
-                return elevator_direction_t::UP;
-            }
+            if (is_above_current) return elevator_direction_t::DOWN; 
+            else return elevator_direction_t::UP;                    
         }
-
-        // last direction = DOWN THEN CABIN is lower than currentFloor
-        else if (last_direction == elevator_direction_t::DOWN)
-        {
-
-            // if wanna go back, GO UP
-            if (data.target >= data.current_floor)
-            {
-                return elevator_direction_t::UP;
-            }
-            else
-            {
-                return elevator_direction_t::DOWN;
-            }
-        }
-
+    }
         // edge case if ele cant remember last_dir
         //  else {
         //      Serial.println("[WARN] Lost position! Homing down to find a floor.");
         //      return ElevatorDirection::DOWN;
         //  }
-    }
+    
 
     // 3. normal case: (btwFloor == false)
     if (data.target > data.current_floor)

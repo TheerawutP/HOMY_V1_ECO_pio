@@ -3,6 +3,8 @@
 #include "Config.h"
 #include <stdint.h>
 
+
+
 enum class elevator_direction_t
 {
   NONE,
@@ -32,6 +34,7 @@ struct elevator_snapshot
   uint8_t current_floor;
   bool btw_floor;
   elevator_direction_t dir;
+  uint8_t last_target;
   elevator_direction_t last_dir;
   uint32_t safety_flags; // event bitmask
 };
@@ -105,6 +108,11 @@ const rf_keymap_t rf_keys[] = {
 
 const int num_rf_keys = sizeof(rf_keys) / sizeof(rf_keymap_t);
 
+
+#define LO_FLOOR 1
+#define HI_FLOOR 2
+
+
 // event bitmask
 
 #define SAFETY_BRAKE_ENGAGE (1 << 0)
@@ -170,3 +178,4 @@ const int num_rf_keys = sizeof(rf_keys) / sizeof(rf_keymap_t);
 #define SF_1014 14 // reach1
 #define SF_1015 15 // reach2
 #define SF_1016 16 // emerg stop
+
