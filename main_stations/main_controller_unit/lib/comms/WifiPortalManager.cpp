@@ -7,6 +7,9 @@ std::unique_ptr<AsyncWebServer> m_wifitools_server;
 bool restartSystem = false;
 String temp_json_string = "";
 
+const byte DNS_PORT = 53; 
+DNSServer dnsServer;
+
 void wifi_portal_init()
 {
   bool m_autoconnected_attempt_succeeded = false;
@@ -24,6 +27,7 @@ void wifi_portal_init()
   }
 
   MDNS.begin("ximplex_ui");
+  Serial.print("System ready! Access at: ");
   Serial.println(WiFi.localIP());
 }
 
@@ -66,6 +70,9 @@ boolean wifi_connect_attempt(String ssid, String password)
     Serial.print(F("IP address: "));
     Serial.println(WiFi.localIP());
     isWiFiConnected = true;
+
+    // Stop captive portal DNS server when WiFi connects
+    stop_captive_portal();
   }
   else
   {
@@ -145,10 +152,16 @@ void setup_ap_service()
   WiFi.mode(WIFI_AP);
   WiFi.softAP("Ximplex LKD");
   delay(1000);
+
+  // Start DNS Server for Captive Portal
+  dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+  Serial.println("Captive Portal DNS Server started");
 }
 
 void process()
 {
+  // Handle DNS requests for captive portal
+  dnsServer.processNextRequest();
   yield();
   delay(10);
   if (restartSystem)
@@ -316,6 +329,13 @@ void handle_get_save_secret_json(AsyncWebServerRequest *request)
   restartSystem = millis();
 }
 
+void stop_captive_portal()
+{
+  Serial.println("Stopping Captive Portal DNS Server...");
+  dnsServer.stop();
+  Serial.println("Captive Portal DNS Server stopped");
+}
+
 void run_wifi_portal()
 {
   m_wifitools_server.reset(new AsyncWebServer(80));
@@ -331,7 +351,56 @@ void run_wifi_portal()
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, PUT");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "*");
 
-  m_wifitools_server->serveStatic("/", SPIFFS, "/").setDefaultFile("wifi_index.html");
+  // Captive Portal detection handlers
+  m_wifitools_server->on("/generate_204", HTTP_GET, [](AsyncWebServerRequest *request) {
+    Serial.println("Captive Portal: /generate_204 detected");
+    request->redirect("/wifi_index.html");
+  });
+
+  m_wifitools_server->on("/fwlink", HTTP_GET, [](AsyncWebServerRequest *request) {
+    Serial.println("Captive Portal: /fwlink detected");
+    request->redirect("/wifi_index.html");
+  });
+
+  m_wifitools_server->on("/connecttest", HTTP_GET, [](AsyncWebServerRequest *request) {
+    Serial.println("Captive Portal: /connecttest detected");
+    request->redirect("/wifi_index.html");
+  });
+
+  m_wifitools_server->on("/hotspot-detect", HTTP_GET, [](AsyncWebServerRequest *request) {
+    Serial.println("Captive Portal: /hotspot-detect detected");
+    request->redirect("/wifi_index.html");
+  });
+
+  m_wifitools_server->on("/library/test/success", HTTP_GET, [](AsyncWebServerRequest *request) {
+    Serial.println("Captive Portal: /library/test/success detected");
+    request->redirect("/wifi_index.html");
+  });
+
+  m_wifitools_server->on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest *request) {
+    Serial.println("Captive Portal: /ncsi.txt detected");
+    request->send(200, "text/plain", "Microsoft NCSI");
+  });
+
+  // Captive Portal Redirect - redirect all other requests to the portal
+  m_wifitools_server->onNotFound([](AsyncWebServerRequest *request) {
+    // Redirect HTTP requests to the portal
+    if (request->method() == HTTP_GET) {
+      String path = request->url();
+      Serial.printf("Captive Portal Redirect: %s -> /wifi_index.html\n", path.c_str());
+
+      // Try to serve the requested file, or redirect to portal
+      if (path.equals("/") || path.equals("/index.html")) {
+        request->send(SPIFFS, "/wifi_index.html", "text/html");
+      } else if (SPIFFS.exists(path)) {
+        request->send(SPIFFS, path);
+      } else {
+        request->redirect("/wifi_index.html");
+      }
+    } else {
+      request->send(404, "Not Found");
+    }
+  });
 
   m_wifitools_server->on("/saveSecret", HTTP_POST, [](AsyncWebServerRequest *request)
                          { handle_get_save_secret_json(request); });
@@ -354,6 +423,7 @@ void run_wifi_portal()
     }
   }
   Serial.println("MDNS started.");
+  Serial.println("Captive Portal is ready! Connect to 'Ximplex LKD' WiFi");
   // MDNS.begin("nanostat");
   while (1) // loop until user hits restart... Once credentials saved, won't end up here again unless wifi not connecting!
   {

@@ -21,6 +21,8 @@ void process();
 
 void run_wifi_portal();
 
+void stop_captive_portal();  // Stop DNS server when WiFi connects
+
 void get_wifi_scan_json(AsyncWebServerRequest *request);
 
 void handle_get_save_secret_json(AsyncWebServerRequest *request);
